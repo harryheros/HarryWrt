@@ -1,0 +1,110 @@
+name: Build HarryWrt (OpenWrt 24.10.5 x86_64 EFI)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install build deps
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex bison g++ gawk \
+            gettext git libncurses-dev libssl-dev \
+            python3 python3-setuptools python3-venv \
+            rsync unzip zlib1g-dev file wget curl ca-certificates \
+            gcc-multilib g++-multilib time
+
+      - name: Clone OpenWrt v24.10.5
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone https://git.openwrt.org/openwrt/openwrt.git openwrt
+          cd openwrt
+          git checkout v24.10.5
+
+      - name: Update feeds + Add Passwall feeds
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd openwrt
+
+          # Official feeds
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+          # Passwall2 feeds (source)
+          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
+          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
+
+          ./scripts/feeds update passwall_packages
+          ./scripts/feeds update passwall2
+
+          ./scripts/feeds install -a -p passwall_packages
+          ./scripts/feeds install -a -p passwall2
+
+      - name: Apply config
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd openwrt
+          cp ../configs/x86_64.config .config
+          make defconfig
+
+      - name: DIY branding
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd openwrt
+          bash ../scripts/diy.sh
+
+      - name: Download sources
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd openwrt
+          make download -j"$(nproc)" V=s
+
+      - name: Build firmware
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd openwrt
+          make -j"$(nproc)" V=s
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          cd openwrt
+
+          # x86_64 EFI combined image (gz)
+          IMG="$(ls -1 bin/targets/x86/64/*combined-efi.img.gz | head -n 1 || true)"
+          if [ -z "${IMG}" ]; then
+            echo "ERROR: combined-efi.img.gz not found under bin/targets/x86/64/"
+            echo "Available files:"
+            ls -lah bin/targets/x86/64 || true
+            exit 1
+          fi
+
+          cp "$IMG" ../out/HarryWrt-24.10.5-Lab-Passwall2-x86-64-efi.img.gz
+          cd ..
+          sha256sum out/* | tee out/SHA256SUMS.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HarryWrt-24.10.5-Lab-Passwall2-x86-64-efi
+          path: out/*
