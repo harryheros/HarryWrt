@@ -37,11 +37,30 @@ jobs:
           restore-keys: |
             harrywrt-pw2-${{ runner.os }}-24.10.5-
 
-      - name: Clone OpenWrt v24.10.5
+      - name: Clone OpenWrt v24.10.5 (retry + fallback)
         shell: bash
         run: |
           set -euxo pipefail
-          git clone --depth=1 --branch v24.10.5 https://git.openwrt.org/openwrt/openwrt.git openwrt
+
+          clone_try() {
+            git clone --depth=1 --branch v24.10.5 "$1" openwrt
+          }
+
+          # Try official Git first (may 503)
+          for i in 1 2 3; do
+            rm -rf openwrt
+            if clone_try "https://git.openwrt.org/openwrt/openwrt.git"; then
+              echo "Cloned from git.openwrt.org"
+              exit 0
+            fi
+            echo "git.openwrt.org failed (attempt $i), retrying in 10s..."
+            sleep 10
+          done
+
+          # Fallback to GitHub mirror
+          rm -rf openwrt
+          clone_try "https://github.com/openwrt/openwrt.git"
+          echo "Cloned from github.com/openwrt/openwrt.git"
 
       - name: Add Passwall feeds
         shell: bash
