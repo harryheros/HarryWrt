@@ -76,20 +76,42 @@ jobs:
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;openwrt-24.10" >> feeds.conf.default
           echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;openwrt-24.10" >> feeds.conf.default
 
-      - name: Update feeds (official first, then passwall)
+      - name: Update feeds (retry + verify)
         shell: bash
         run: |
           set -euxo pipefail
           cd openwrt
 
-          # 1) Ensure official feeds are installed first (avoid "feeds/packages not found" noise)
-          ./scripts/feeds update packages luci routing
+          retry() {
+            local n=0
+            until "$@"; do
+              n=$((n+1))
+              if [ "$n" -ge 5 ]; then
+                echo "Command failed after $n attempts: $*"
+                return 1
+              fi
+              echo "Retry $n/5: $* (sleep 10s)"
+              sleep 10
+            done
+          }
+
+          # 1) Official feeds first (split + retry)
+          retry ./scripts/feeds update packages
+          retry ./scripts/feeds update luci
+          retry ./scripts/feeds update routing
+
           ./scripts/feeds install -a -p packages
           ./scripts/feeds install -a -p luci
           ./scripts/feeds install -a -p routing
 
-          # 2) Then update/install passwall feeds
-          ./scripts/feeds update passwall_packages passwall2
+          # Verify directories exist (fail loud instead of "find: no such file")
+          test -d feeds/packages || (echo "ERROR: feeds/packages missing (feeds update/install failed)"; exit 1)
+          test -d feeds/luci || (echo "ERROR: feeds/luci missing (feeds update/install failed)"; exit 1)
+
+          # 2) Passwall feeds (split + retry)
+          retry ./scripts/feeds update passwall_packages
+          retry ./scripts/feeds update passwall2
+
           ./scripts/feeds install -a -p passwall_packages
           ./scripts/feeds install -a -p passwall2
 
