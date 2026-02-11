@@ -123,6 +123,16 @@ jobs:
           cp ../configs/x86_64-passwall2.config .config
           make defconfig
 
+      - name: Debug config (who pulls rust)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd openwrt
+          echo "=== rust-related selections ==="
+          grep -nE 'CONFIG_PACKAGE_.*(rust|cargo|tuic|juicity|hysteria|shadow-tls|naive|mieru)=' .config || true
+          echo "=== passwall2 include options ==="
+          grep -nE 'CONFIG_PACKAGE_luci-app-passwall2.*INCLUDE' .config || true
+
       - name: DIY branding
         shell: bash
         run: |
