@@ -99,12 +99,12 @@ jobs:
             exit 1
           fi
 
-          cp "$IMG" ../out/HarryWrt-24.10.5-x86-64-efi.img.gz
+          cp "$IMG" ../out/HarryWrt-24.10.5-Lab-Passwall2-x86-64-efi.img.gz
           cd ..
           sha256sum out/* | tee out/SHA256SUMS.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HarryWrt-24.10.5-x86-64-efi
+          name: HarryWrt-24.10.5-Lab-Passwall2-x86-64-efi
           path: out/*
