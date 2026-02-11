@@ -34,25 +34,13 @@ jobs:
           cd openwrt
           git checkout v24.10.5
 
-      - name: Update feeds + Add Passwall feeds
+      - name: Update feeds
         shell: bash
         run: |
           set -euxo pipefail
           cd openwrt
-
-          # Official feeds
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-
-          # Passwall2 feeds (source)
-          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
-          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
-
-          ./scripts/feeds update passwall_packages
-          ./scripts/feeds update passwall2
-
-          ./scripts/feeds install -a -p passwall_packages
-          ./scripts/feeds install -a -p passwall2
 
       - name: Apply config
         shell: bash
@@ -99,12 +87,12 @@ jobs:
             exit 1
           fi
 
-          cp "$IMG" ../out/HarryWrt-24.10.5-Lab-Passwall2-x86-64-efi.img.gz
+          cp "$IMG" ../out/HarryWrt-24.10.5-x86-64-efi.img.gz
           cd ..
           sha256sum out/* | tee out/SHA256SUMS.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: HarryWrt-24.10.5-Lab-Passwall2-x86-64-efi
+          name: HarryWrt-24.10.5-x86-64-efi
           path: out/*
