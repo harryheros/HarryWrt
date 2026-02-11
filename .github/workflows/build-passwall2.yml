@@ -64,21 +64,34 @@ jobs:
           restore-keys: |
             harrywrt-pw2-${{ runner.os }}-24.10.5-
 
-      - name: Add Passwall feeds
+      - name: Add Passwall feeds (prefer 24.10 branch)
         shell: bash
         run: |
           set -euxo pipefail
           cd openwrt
-          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
-          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
 
-      - name: Update feeds
+          # NOTE:
+          # - Use openwrt-24.10 branch if the repo provides it (best compatibility with 24.10.5).
+          # - If this branch doesn't exist, the build will fail at feeds update; then we will pin to a known-good commit.
+          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;openwrt-24.10" >> feeds.conf.default
+          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;openwrt-24.10" >> feeds.conf.default
+
+      - name: Update feeds (official first, then passwall)
         shell: bash
         run: |
           set -euxo pipefail
           cd openwrt
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
+
+          # 1) Ensure official feeds are installed first (avoid "feeds/packages not found" noise)
+          ./scripts/feeds update packages luci routing
+          ./scripts/feeds install -a -p packages
+          ./scripts/feeds install -a -p luci
+          ./scripts/feeds install -a -p routing
+
+          # 2) Then update/install passwall feeds
+          ./scripts/feeds update passwall_packages passwall2
+          ./scripts/feeds install -a -p passwall_packages
+          ./scripts/feeds install -a -p passwall2
 
       - name: Apply config
         shell: bash
