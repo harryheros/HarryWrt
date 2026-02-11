@@ -73,8 +73,8 @@ jobs:
           # NOTE:
           # - Use openwrt-24.10 branch if the repo provides it (best compatibility with 24.10.5).
           # - If this branch doesn't exist, the build will fail at feeds update; then we will pin to a known-good commit.
-          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;openwrt-24.10" >> feeds.conf.default
-          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;openwrt-24.10" >> feeds.conf.default
+          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
+          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
 
       - name: Update feeds (retry + verify)
         shell: bash
