@@ -1,4 +1,4 @@
-name: Build HarryWrt (OpenWrt 24.10.5 x86_64 EFI)
+name: Build HarryWrt (24.10.5 Lab Passwall2 x86_64 EFI)
 
 on:
   workflow_dispatch:
