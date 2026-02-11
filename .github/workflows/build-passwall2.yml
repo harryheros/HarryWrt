@@ -81,12 +81,16 @@ jobs:
           cd openwrt
           make download -j"$(nproc)"
 
-      - name: Build firmware
+      - name: Build firmware (capture error)
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           cd openwrt
-          make -j"$(nproc)" V=s
+
+          # 1) reduce parallelism to avoid OOM
+          # 2) avoid V=s to prevent gigantic logs
+          # 3) on failure, print the last 200 lines which always contains the real error
+          (make -j2 2>&1 | tee build.log) || (echo "===== LAST 200 LINES ====="; tail -n 200 build.log; exit 1)
 
       - name: Collect artifacts
         shell: bash
