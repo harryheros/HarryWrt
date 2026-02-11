@@ -34,13 +34,25 @@ jobs:
           cd openwrt
           git checkout v24.10.5
 
-      - name: Update feeds
+      - name: Update feeds + Add Passwall feeds
         shell: bash
         run: |
           set -euxo pipefail
           cd openwrt
+
+          # Official feeds
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+
+          # Passwall2 feeds (source)
+          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
+          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
+
+          ./scripts/feeds update passwall_packages
+          ./scripts/feeds update passwall2
+
+          ./scripts/feeds install -a -p passwall_packages
+          ./scripts/feeds install -a -p passwall2
 
       - name: Apply config
         shell: bash
