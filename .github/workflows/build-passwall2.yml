@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euxo pipefail
           cd openwrt
-          cp ../configs/x86_64.config .config
+          cp ../configs/x86_64-passwall2.config .config
           make defconfig
 
       - name: DIY branding
