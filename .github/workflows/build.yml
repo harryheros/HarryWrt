@@ -249,7 +249,7 @@ jobs:
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
           echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
 
-      - name: Update and install feeds (Passwall2 robust; auto-print dump.txt on failure)
+      - name: Update and install feeds (Passwall2 stable; avoid geoview)
         shell: bash
         run: |
           set -euo pipefail
@@ -259,25 +259,18 @@ jobs:
 
           ./scripts/feeds uninstall -a dnsmasq || true
 
-# Install passwall2 package definitions
-./scripts/feeds install -a -p passwall2 -f 2>&1 | tee -a build.log || {
-  echo "passwall2 feeds install failed; printing dump.txt (if any)..." | tee -a build.log
-  find logs -type f -name dump.txt -maxdepth 6 -print -exec sed -n '1,240p' {} \; | tee -a build.log || true
-  exit 1
-}
-
-# Install ONLY the required passwall_packages definitions (do not install -a)
-# This keeps optional troublemakers like geoview out of Kconfig visibility.
-./scripts/feeds install -f -p passwall_packages \
-  xray-core sing-box v2ray-geodata \
-  microsocks ipt2socks tcping \
-  shadowsocks-libev shadowsocksr-libev simple-obfs \
-  v2ray-plugin xray-plugin trojan-plus \
-  2>&1 | tee -a build.log || true
-            echo "feeds install failed; printing dump.txt (if any)..." | tee -a build.log
+          ./scripts/feeds install -a -p passwall2 -f 2>&1 | tee -a build.log || {
+            echo "passwall2 feeds install failed; printing dump.txt (if any)..." | tee -a build.log
             find logs -type f -name dump.txt -maxdepth 6 -print -exec sed -n '1,240p' {} \; | tee -a build.log || true
             exit 1
           }
+
+          ./scripts/feeds install -f -p passwall_packages \
+            xray-core sing-box v2ray-geodata \
+            microsocks ipt2socks tcping \
+            shadowsocks-libev shadowsocksr-libev simple-obfs \
+            v2ray-plugin xray-plugin trojan-plus \
+            2>&1 | tee -a build.log || true
 
           ./scripts/feeds install -f -p packages \
             luci luci-ssl luci-theme-argon \
@@ -297,7 +290,7 @@ jobs:
             dl-cache-pw2-${{ runner.os }}-
             dl-cache-
 
-      - name: Apply config and run DIY (no rust; stability toggles)
+      - name: Apply config and run DIY (no rust; stable)
         shell: bash
         run: |
           set -euo pipefail
@@ -307,8 +300,8 @@ jobs:
 
           force_n() {
             local key="$1"
-            sed -i "/^${key}=.*/d" .config
-            sed -i "/^# ${key} is not set$/d" .config
+            sed -i "/^${key}=.*/d" .config || true
+            sed -i "/^# ${key} is not set$/d" .config || true
             echo "# ${key} is not set" >> .config
           }
 
