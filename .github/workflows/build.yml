@@ -249,7 +249,7 @@ jobs:
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
           echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
 
-      - name: Update and install feeds (Passwall2 minimal + dependency defs)
+      - name: Update and install feeds (Passwall2 robust; auto-print dump.txt on failure)
         shell: bash
         run: |
           set -euo pipefail
@@ -257,18 +257,23 @@ jobs:
 
           ./scripts/feeds update -a -f 2>&1 | tee -a build.log
 
+          # Prevent dnsmasq vs dnsmasq-full edge cases
           ./scripts/feeds uninstall -a dnsmasq || true
 
+          # Robust mode: install full definitions for passwall feeds to avoid "missing package" dump failures
+          ./scripts/feeds install -a -p passwall_packages -f 2>&1 | tee -a build.log || true
+          ./scripts/feeds install -a -p passwall2 -f 2>&1 | tee -a build.log || {
+            echo "feeds install failed; printing dump.txt (if any)..." | tee -a build.log
+            find logs -type f -name dump.txt -maxdepth 6 -print -exec sed -n '1,240p' {} \; | tee -a build.log || true
+            exit 1
+          }
+
+          # Install only the packages we actually want enabled (definitions are already present)
           ./scripts/feeds install -f -p packages \
             luci luci-ssl luci-theme-argon \
             bash curl htop \
             dnsmasq-full ca-bundle \
             xray-core sing-box 2>&1 | tee -a build.log
-
-          ./scripts/feeds install -f -p packages \
-            libev libpam libtirpc net-snmp 2>&1 | tee -a build.log || true
-
-          ./scripts/feeds install -f -p passwall2 luci-app-passwall2 2>&1 | tee -a build.log
 
           ls -la package/feeds/packages 2>&1 | tee -a build.log || true
 
@@ -282,7 +287,7 @@ jobs:
             dl-cache-pw2-${{ runner.os }}-
             dl-cache-
 
-      - name: Apply config and run DIY (no rust, strict, diagnostics)
+      - name: Apply config and run DIY (no rust; stability toggles)
         shell: bash
         run: |
           set -euo pipefail
@@ -297,47 +302,31 @@ jobs:
             echo "# ${key} is not set" >> .config
           }
 
+          # Hard-disable Rust/Cargo
           force_n CONFIG_PACKAGE_rust
           force_n CONFIG_PACKAGE_cargo
 
+          # Disable optional components (avoid rust-related toolchains)
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY
 
-          force_n CONFIG_PACKAGE_luci-app-package-manager
-
-          # Workaround for geoview build failures on some runners/feeds states
+          # Disable geoview (not required for runtime; avoids build failures)
           force_n CONFIG_PACKAGE_geoview
-          # Optional: also disable geo data packages if you want maximum stability
-          # force_n CONFIG_PACKAGE_v2ray-geodata
-          # force_n CONFIG_PACKAGE_v2ray-geoip
-          # force_n CONFIG_PACKAGE_v2ray-geosite
+
+          # Disable LuCI web package manager (optional)
+          force_n CONFIG_PACKAGE_luci-app-package-manager
 
           chmod +x ../scripts/diy.sh
           bash ../scripts/diy.sh 2>&1 | tee -a build.log
 
           make defconfig 2>&1 | tee -a build.log || { echo "defconfig failed"; tail -n 200 build.log; exit 1; }
 
-          echo "Rust/Cargo lines in .config:" | tee -a build.log
-          grep -nE '^(CONFIG_PACKAGE_(rust|cargo)=|# CONFIG_PACKAGE_(rust|cargo) is not set)$' .config | tee -a build.log || true
-
-          if grep -qE '^CONFIG_PACKAGE_rust=y$' .config || grep -qE '^CONFIG_PACKAGE_cargo=y$' .config; then
-            echo "Rust/Cargo was selected by dependency tree. Investigating..." | tee -a build.log
-            echo "Searching Kconfig/Makefile rust/cargo selectors (precise)..." | tee -a build.log
-
-            grep -RInE --include='Config.in' --include='Kconfig' --include='*.in' \
-              '(^|\s)(select|depends on)\s+(RUST|CARGO)(\s|$)|(^|\s)(select|depends on)\s+PACKAGE_(rust|cargo)(\s|$)|(^|\s)PACKAGE_(rust|cargo)(\s|$)' \
-              package package/feeds 2>/dev/null | head -n 200 | tee -a build.log || true
-
-            grep -RInE --include='Makefile' \
-              'DEPENDS.*(\+rust|\+cargo)|\+PACKAGE_rust|\+PACKAGE_cargo' \
-              package package/feeds 2>/dev/null | head -n 200 | tee -a build.log || true
-
-            echo "Failing build to keep no-rust policy strict." | tee -a build.log
-            exit 1
-          fi
+          grep -qE '^(CONFIG_PACKAGE_rust=n|# CONFIG_PACKAGE_rust is not set)$' .config
+          grep -qE '^(CONFIG_PACKAGE_cargo=n|# CONFIG_PACKAGE_cargo is not set)$' .config
+          grep -qE '^(CONFIG_PACKAGE_geoview=n|# CONFIG_PACKAGE_geoview is not set)$' .config
 
       - name: Download sources
         shell: bash
