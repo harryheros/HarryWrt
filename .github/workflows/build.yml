@@ -110,12 +110,10 @@ jobs:
 
           ./scripts/feeds update -a -f 2>&1 | tee -a build.log
 
-          # Install only what Clean needs (avoid installing everything from feeds/packages)
           ./scripts/feeds install -f -p packages \
             luci luci-ssl luci-theme-argon \
             bash curl htop 2>&1 | tee -a build.log
 
-          # Optional: show what got linked
           ls -la package/feeds/packages 2>&1 | tee -a build.log || true
 
       - name: Cache downloads (dl)
@@ -128,42 +126,18 @@ jobs:
             dl-cache-clean-
             dl-cache-
 
-      - name: Apply config and run DIY for
+      - name: Apply config and run DIY
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
 
-      - name: Apply config and run DIY (enforce no rust)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd openwrt
-
-          cp ../configs/x86_64-passwall2.config .config
-
-          force_n() {
-            local key="$1"
-            sed -i "/^${key}=.*/d" .config
-            sed -i "/^# ${key} is not set$/d" .config
-            echo "# ${key} is not set" >> .config
-          }
-
-          force_n CONFIG_PACKAGE_rust
-          force_n CONFIG_PACKAGE_cargo
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY
+          cp ../configs/x86_64-clean.config .config
 
           chmod +x ../scripts/diy.sh
           bash ../scripts/diy.sh 2>&1 | tee -a build.log
 
           make defconfig 2>&1 | tee -a build.log || { echo "defconfig failed"; tail -n 200 build.log; exit 1; }
-
-          grep -qE '^(CONFIG_PACKAGE_rust=n|# CONFIG_PACKAGE_rust is not set)$' .config || { echo "rust check failed"; tail -n 120 .config; exit 1; }
-          grep -qE '^(CONFIG_PACKAGE_cargo=n|# CONFIG_PACKAGE_cargo is not set)$' .config || { echo "cargo check failed"; tail -n 120 .config; exit 1; }
 
       - name: Download sources
         shell: bash
@@ -283,19 +257,16 @@ jobs:
 
           ./scripts/feeds update -a -f 2>&1 | tee -a build.log
 
-          # Core UI/tools + required runtime packages
           ./scripts/feeds install -f -p packages \
             luci luci-ssl luci-theme-argon \
             bash curl htop \
             dnsmasq-full ca-bundle \
             xray-core sing-box 2>&1 | tee -a build.log
 
-          # Dependency definitions needed by defconfig metadata checks (avoid exit 1)
-          # These correspond to warnings you saw: libev/libpam/libtirpc/libnetsnmp
+          # Dependency definitions often referenced during defconfig metadata checks
           ./scripts/feeds install -f -p packages \
             libev libpam libtirpc net-snmp 2>&1 | tee -a build.log || true
 
-          # Passwall2 LuCI app
           ./scripts/feeds install -f -p passwall2 luci-app-passwall2 2>&1 | tee -a build.log
 
           ls -la package/feeds/packages 2>&1 | tee -a build.log || true
@@ -310,40 +281,7 @@ jobs:
             dl-cache-pw2-${{ runner.os }}-
             dl-cache-
 
-      - name: Apply config and run DIY (enforce no rust)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd openwrt
-
-          cp ../configs/x86_64-passwall2.config .config
-
-          set_kconfig() {
-            local key="$1"
-            local val="$2"
-            if grep -qE "^${key}=" .config; then
-              sed -i "s#^${key}=.*#${key}=${val}#g" .config
-            elif grep -qE "^# ${key} is not set" .config; then
-              sed -i "s#^# ${key} is not set#${key}=${val}#g" .config
-            else
-              echo "${key}=${val}" >> .config
-            fi
-          }
-
-          set_kconfig CONFIG_PACKAGE_rust n
-          set_kconfig CONFIG_PACKAGE_cargo n
-          set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT n
-          set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER n
-          set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2 n
-          set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS n
-          set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY n
-
-          chmod +x ../scripts/diy.sh
-          bash ../scripts/diy.sh 2>&1 | tee -a build.log
-
-          make defconfig 2>&1 | tee -a build.log
-
-      - name: Apply config and run DIY (enforce no rust)
+      - name: Apply config and run DIY (enforce no rust, with diagnostics)
         shell: bash
         run: |
           set -euo pipefail
@@ -353,17 +291,9 @@ jobs:
 
           force_n() {
             local key="$1"
-            # Remove any existing forms, then write the canonical "not set" form
             sed -i "/^${key}=.*/d" .config
             sed -i "/^# ${key} is not set$/d" .config
             echo "# ${key} is not set" >> .config
-          }
-
-          force_y() {
-            local key="$1"
-            sed -i "/^${key}=.*/d" .config
-            sed -i "/^# ${key} is not set$/d" .config
-            echo "${key}=y" >> .config
           }
 
           # Hard-disable Rust/Cargo and selected Passwall2 options
@@ -378,11 +308,26 @@ jobs:
           chmod +x ../scripts/diy.sh
           bash ../scripts/diy.sh 2>&1 | tee -a build.log
 
-          make defconfig 2>&1 | tee -a build.log
+          make defconfig 2>&1 | tee -a build.log || { echo "defconfig failed"; tail -n 200 build.log; exit 1; }
 
-          # Verify disabled (accept both styles: "=n" or "# ... is not set")
-          grep -qE '^(CONFIG_PACKAGE_rust=n|# CONFIG_PACKAGE_rust is not set)$' .config
-          grep -qE '^(CONFIG_PACKAGE_cargo=n|# CONFIG_PACKAGE_cargo is not set)$' .config
+          echo "Rust/Cargo config lines (after defconfig):" | tee -a build.log
+          grep -nE '^(CONFIG_PACKAGE_(rust|cargo)=|# CONFIG_PACKAGE_(rust|cargo) is not set)$' .config | tee -a build.log || true
+
+          if ! grep -qE '^(CONFIG_PACKAGE_rust=n|# CONFIG_PACKAGE_rust is not set)$' .config; then
+            echo "Rust check failed. Printing rust/cargo lines:" | tee -a build.log
+            grep -nE '^(CONFIG_PACKAGE_(rust|cargo)=|# CONFIG_PACKAGE_(rust|cargo) is not set)$' .config | tee -a build.log || true
+            echo "Searching potential rust pullers (first 80 matches):" | tee -a build.log
+            grep -RInE 'select.*RUST|depends on.*RUST|cargo|rust' package package/feeds 2>/dev/null | head -n 80 | tee -a build.log || true
+            exit 1
+          fi
+
+          if ! grep -qE '^(CONFIG_PACKAGE_cargo=n|# CONFIG_PACKAGE_cargo is not set)$' .config; then
+            echo "Cargo check failed. Printing rust/cargo lines:" | tee -a build.log
+            grep -nE '^(CONFIG_PACKAGE_(rust|cargo)=|# CONFIG_PACKAGE_(rust|cargo) is not set)$' .config | tee -a build.log || true
+            echo "Searching potential rust pullers (first 80 matches):" | tee -a build.log
+            grep -RInE 'select.*RUST|depends on.*RUST|cargo|rust' package package/feeds 2>/dev/null | head -n 80 | tee -a build.log || true
+            exit 1
+          fi
 
       - name: Download sources
         shell: bash
