@@ -1,3 +1,5 @@
+# File: .github/workflows/build.yml
+
 name: Build HarryWrt (OpenWrt 24.10.5 Clean x86_64)
 
 on:
@@ -21,6 +23,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,6 +33,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             rel="${{ github.event.inputs.release_version }}"
           else
@@ -37,6 +41,7 @@ jobs:
             rel="$(echo "$tag" | grep -oE 'v[0-9]+(\.[0-9]+){0,2}' || true)"
             [[ -n "$rel" ]] || rel="v1.0"
           fi
+
           echo "release=$rel" >> "$GITHUB_OUTPUT"
           echo "Release: $rel"
 
@@ -44,6 +49,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell || true
           df -h
 
@@ -58,6 +64,7 @@ jobs:
           sudo chmod 600 "$SWAP_PATH"
           sudo mkswap "$SWAP_PATH"
           sudo swapon "$SWAP_PATH"
+
           sudo swapon --show
           free -h
 
@@ -65,6 +72,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
@@ -72,6 +80,7 @@ jobs:
             file wget curl ca-certificates time \
             python3 python3-distutils python3-setuptools python3-pyelftools \
             gperf swig subversion mercurial
+
           git --version
           python3 --version
 
@@ -79,6 +88,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
@@ -86,6 +96,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd openwrt
           ./scripts/feeds update -a 2>&1 | tee -a build.log
           ./scripts/feeds install -a -f 2>&1 | tee -a build.log
@@ -94,8 +105,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cd openwrt
 
+          cd openwrt
           cp "${GITHUB_WORKSPACE}/configs/x86_64-clean.config" .config
 
           chmod +x "${GITHUB_WORKSPACE}/scripts/diy.sh"
@@ -107,6 +118,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd openwrt
           make download -j"$(nproc)" 2>&1 | tee -a build.log
 
@@ -114,6 +126,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd openwrt
           make -j"$(nproc)" 2>&1 | tee -a build.log || make -j1 V=s 2>&1 | tee -a build.log
 
