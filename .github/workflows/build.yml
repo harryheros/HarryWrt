@@ -263,7 +263,6 @@ jobs:
             dnsmasq-full ca-bundle \
             xray-core sing-box 2>&1 | tee -a build.log
 
-          # Dependency definitions often referenced during defconfig metadata checks
           ./scripts/feeds install -f -p packages \
             libev libpam libtirpc net-snmp 2>&1 | tee -a build.log || true
 
@@ -281,7 +280,7 @@ jobs:
             dl-cache-pw2-${{ runner.os }}-
             dl-cache-
 
-      - name: Apply config and run DIY (enforce no rust, with diagnostics)
+      - name: Apply config and run DIY (no rust, strict, diagnostics)
         shell: bash
         run: |
           set -euo pipefail
@@ -296,9 +295,9 @@ jobs:
             echo "# ${key} is not set" >> .config
           }
 
-          # Hard-disable Rust/Cargo and selected Passwall2 options
           force_n CONFIG_PACKAGE_rust
           force_n CONFIG_PACKAGE_cargo
+
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2
@@ -310,22 +309,23 @@ jobs:
 
           make defconfig 2>&1 | tee -a build.log || { echo "defconfig failed"; tail -n 200 build.log; exit 1; }
 
-          echo "Rust/Cargo config lines (after defconfig):" | tee -a build.log
+          echo "Rust/Cargo lines in .config:" | tee -a build.log
           grep -nE '^(CONFIG_PACKAGE_(rust|cargo)=|# CONFIG_PACKAGE_(rust|cargo) is not set)$' .config | tee -a build.log || true
 
-          if ! grep -qE '^(CONFIG_PACKAGE_rust=n|# CONFIG_PACKAGE_rust is not set)$' .config; then
-            echo "Rust check failed. Printing rust/cargo lines:" | tee -a build.log
-            grep -nE '^(CONFIG_PACKAGE_(rust|cargo)=|# CONFIG_PACKAGE_(rust|cargo) is not set)$' .config | tee -a build.log || true
-            echo "Searching potential rust pullers (first 80 matches):" | tee -a build.log
-            grep -RInE 'select.*RUST|depends on.*RUST|cargo|rust' package package/feeds 2>/dev/null | head -n 80 | tee -a build.log || true
-            exit 1
-          fi
+          if grep -qE '^CONFIG_PACKAGE_rust=y$' .config || grep -qE '^CONFIG_PACKAGE_cargo=y$' .config; then
+            echo "Rust/Cargo was selected by dependency tree. Investigating..." | tee -a build.log
 
-          if ! grep -qE '^(CONFIG_PACKAGE_cargo=n|# CONFIG_PACKAGE_cargo is not set)$' .config; then
-            echo "Cargo check failed. Printing rust/cargo lines:" | tee -a build.log
-            grep -nE '^(CONFIG_PACKAGE_(rust|cargo)=|# CONFIG_PACKAGE_(rust|cargo) is not set)$' .config | tee -a build.log || true
-            echo "Searching potential rust pullers (first 80 matches):" | tee -a build.log
-            grep -RInE 'select.*RUST|depends on.*RUST|cargo|rust' package package/feeds 2>/dev/null | head -n 80 | tee -a build.log || true
+            echo "Searching Kconfig/Makefile rust/cargo selectors (precise)..." | tee -a build.log
+
+            grep -RInE --include='Config.in' --include='Kconfig' --include='*.in' \
+              '(^|\s)(select|depends on)\s+(RUST|CARGO)(\s|$)|(^|\s)(select|depends on)\s+PACKAGE_(rust|cargo)(\s|$)|(^|\s)PACKAGE_(rust|cargo)(\s|$)' \
+              package package/feeds 2>/dev/null | head -n 200 | tee -a build.log || true
+
+            grep -RInE --include='Makefile' \
+              'DEPENDS.*(\+rust|\+cargo)|\+PACKAGE_rust|\+PACKAGE_cargo' \
+              package package/feeds 2>/dev/null | head -n 200 | tee -a build.log || true
+
+            echo "Failing build to keep no-rust policy strict." | tee -a build.log
             exit 1
           fi
 
