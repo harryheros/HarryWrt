@@ -13,8 +13,8 @@ on:
         description: "Release version (e.g. v1.0)"
         required: true
         default: "v1.0"
-      passwall_tag:
-        description: "Passwall tag (passwall2 and passwall_packages)"
+      passwall_ref:
+        description: "Passwall ref (tag/commit/branch), e.g. 26.2.5-1"
         required: true
         default: "26.2.5-1"
   push:
@@ -49,6 +49,7 @@ jobs:
 
     steps:
       - name: Gate (profile/tag filter)
+        id: gate
         shell: bash
         run: |
           set -euo pipefail
@@ -56,41 +57,35 @@ jobs:
           event="${{ github.event_name }}"
           ref="${{ github.ref }}"
           profile="${{ github.event.inputs.profile || 'both' }}"
-          prefix="${{ matrix.tag_prefix }}"
           mid="${{ matrix.id }}"
+          prefix="${{ matrix.tag_prefix }}"
 
+          run="false"
+
+          if [[ "$event" == "workflow_dispatch" ]]; then
+            if [[ "$profile" == "both" || "$profile" == "$mid" ]]; then
+              run="true"
+            fi
+          elif [[ "$ref" == refs/tags/* ]]; then
+            tag="${ref#refs/tags/}"
+            if [[ "$tag" == ${prefix}v* ]]; then
+              run="true"
+            fi
+          fi
+
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "run=$run"
           echo "event=$event"
           echo "ref=$ref"
           echo "profile=$profile"
           echo "matrix_id=$mid"
-          echo "tag_prefix=$prefix"
-
-          if [[ "$event" == "workflow_dispatch" ]]; then
-            if [[ "$profile" == "both" || "$profile" == "$mid" ]]; then
-              echo "Selected by workflow_dispatch profile."
-              exit 0
-            fi
-            echo "Not selected by workflow_dispatch profile. Skipping."
-            exit 0
-          fi
-
-          if [[ "$ref" == refs/tags/* ]]; then
-            tag="${ref#refs/tags/}"
-            if [[ "$tag" == ${prefix}v* ]]; then
-              echo "Selected by tag: $tag"
-              exit 0
-            fi
-            echo "Tag does not match this matrix. Skipping."
-            exit 0
-          fi
-
-          echo "Unsupported event. Skipping."
-          exit 0
 
       - name: Checkout repository
+        if: steps.gate.outputs.run == 'true'
         uses: actions/checkout@v4
 
       - name: Determine release version
+        if: steps.gate.outputs.run == 'true'
         id: meta
         shell: bash
         run: |
@@ -107,6 +102,7 @@ jobs:
           echo "Release: $rel"
 
       - name: Free disk space and enable swap
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -128,6 +124,7 @@ jobs:
           free -h
 
       - name: Install build dependencies
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -142,33 +139,68 @@ jobs:
           python3 --version
 
       - name: Clone OpenWrt source
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
-      - name: Add Passwall feeds (pinned tag)
-        if: matrix.add_passwall == 'true'
+      - name: Add Passwall feeds (use main, checkout ref later)
+        if: steps.gate.outputs.run == 'true' && matrix.add_passwall == 'true'
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
-          PW_TAG="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.passwall_tag || '26.2.5-1' }}"
-          echo "Using Passwall tag: ${PW_TAG}" | tee -a build.log
-          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;${PW_TAG}" >> feeds.conf.default
-          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;${PW_TAG}" >> feeds.conf.default
+          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
+          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
           tail -n 30 feeds.conf.default | tee -a build.log
 
-      - name: Update and install feeds (full)
+      - name: Update feeds
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
           ./scripts/feeds update -a 2>&1 | tee -a build.log
+
+      - name: Checkout Passwall ref (tag/commit/branch)
+        if: steps.gate.outputs.run == 'true' && matrix.add_passwall == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd openwrt
+
+          PW_REF="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.passwall_ref || '26.2.5-1' }}"
+          echo "Using Passwall ref: ${PW_REF}" | tee -a build.log
+
+          for d in passwall_packages passwall2; do
+            if [[ ! -d "feeds/${d}" ]]; then
+              echo "ERROR: feeds/${d} is missing after feeds update." | tee -a build.log
+              exit 1
+            fi
+            cd "feeds/${d}"
+            git fetch --tags --force 2>&1 | tee -a ../../build.log
+            if git rev-parse -q --verify "${PW_REF}^{commit}" >/dev/null 2>&1; then
+              git checkout -f "${PW_REF}" 2>&1 | tee -a ../../build.log
+            else
+              echo "ERROR: ref not found in feeds/${d}: ${PW_REF}" | tee -a ../../build.log
+              git tag -l | tail -n 30 | tee -a ../../build.log || true
+              exit 1
+            fi
+            cd ../../
+          done
+
+      - name: Install feeds (full)
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd openwrt
           ./scripts/feeds install -a -f 2>&1 | tee -a build.log
 
       - name: Cache downloads (dl)
+        if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: openwrt/dl
@@ -179,6 +211,7 @@ jobs:
             dl-cache-
 
       - name: Apply config and run DIY
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -201,6 +234,7 @@ jobs:
           make defconfig 2>&1 | tee -a build.log
 
       - name: Download sources
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -208,6 +242,7 @@ jobs:
           make download -j"$(nproc)" 2>&1 | tee -a build.log
 
       - name: Build firmware
+        if: steps.gate.outputs.run == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -215,14 +250,14 @@ jobs:
           make -j2 2>&1 | tee -a build.log || make -j1 V=s 2>&1 | tee -a build.log
 
       - name: Upload build log
-        if: always()
+        if: steps.gate.outputs.run == 'true' && always()
         uses: actions/upload-artifact@v4
         with:
           name: Log-${{ matrix.id }}-${{ steps.meta.outputs.release }}
           path: openwrt/build.log
 
       - name: Upload firmware
-        if: success()
+        if: steps.gate.outputs.run == 'true' && success()
         uses: actions/upload-artifact@v4
         with:
           name: HarryWrt-${{ env.OWRT_BASE }}-${{ matrix.id }}-${{ steps.meta.outputs.release }}
