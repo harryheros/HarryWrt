@@ -128,18 +128,42 @@ jobs:
             dl-cache-clean-
             dl-cache-
 
-      - name: Apply config and run DIY
+      - name: Apply config and run DIY for
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
 
-          cp ../configs/x86_64-clean.config .config
+      - name: Apply config and run DIY (enforce no rust)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd openwrt
+
+          cp ../configs/x86_64-passwall2.config .config
+
+          force_n() {
+            local key="$1"
+            sed -i "/^${key}=.*/d" .config
+            sed -i "/^# ${key} is not set$/d" .config
+            echo "# ${key} is not set" >> .config
+          }
+
+          force_n CONFIG_PACKAGE_rust
+          force_n CONFIG_PACKAGE_cargo
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY
 
           chmod +x ../scripts/diy.sh
           bash ../scripts/diy.sh 2>&1 | tee -a build.log
 
-          make defconfig 2>&1 | tee -a build.log
+          make defconfig 2>&1 | tee -a build.log || { echo "defconfig failed"; tail -n 200 build.log; exit 1; }
+
+          grep -qE '^(CONFIG_PACKAGE_rust=n|# CONFIG_PACKAGE_rust is not set)$' .config || { echo "rust check failed"; tail -n 120 .config; exit 1; }
+          grep -qE '^(CONFIG_PACKAGE_cargo=n|# CONFIG_PACKAGE_cargo is not set)$' .config || { echo "cargo check failed"; tail -n 120 .config; exit 1; }
 
       - name: Download sources
         shell: bash
