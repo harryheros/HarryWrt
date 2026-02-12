@@ -1,149 +1,154 @@
 # HarryWrt
 
-HarryWrt is a clean and stable OpenWrt build designed for x86_64 systems.
+HarryWrt is a clean and performance-focused OpenWrt build for x86_64 systems.
 
-This project focuses on providing a minimal, fast, and reliable OpenWrt base image with LuCI and essential tools pre-installed.
-
-No proxy stack is included by default. Users are free to install and customize additional packages as needed.
+This project is based on the official OpenWrt source code and is designed to provide a minimal, stable, and customizable firmware image with a clean LuCI experience.
 
 ---
 
-## Features
+## Base Information
 
-- Based on official OpenWrt release
-- Clean build (no third-party proxy stack prebuilt)
-- LuCI Web UI (HTTPS enabled)
-- Argon theme
-- luci-compat included
-- dnsmasq-full included
-- Common diagnostic and system tools included
-- Suitable for Proxmox / ESXi / Bare Metal / Cloud VPS
-
----
-
-## Included Packages
-
-- luci
-- luci-ssl
-- luci-theme-argon
-- luci-compat
-- dnsmasq-full
-- bash
-- curl
-- htop
-- ca-bundle
-- openssl-util
-- ip-full
-- ipset
-- iperf3
-- tcpdump
-- ethtool
-- lsblk
-- block-mount
-- fdisk
-- e2fsprogs
-- nftables
-- iptables-nft
-- kmod-tun
-- zoneinfo-asia
+- Base: OpenWrt 24.10.5
+- Target: x86_64 (generic)
+- Profile: Clean Edition
+- Default Web UI: LuCI (HTTPS)
+- Default Theme: Argon
+- Default Hostname: HarryWrt
+- Default Timezone: Asia/Hong_Kong
+- Rootfs Size: 1024MB (1GB)
 
 ---
 
-## Default Settings
+## Download
 
-- Hostname: HarryWrt
-- Timezone: Asia/Hong_Kong
-- LuCI Theme: Argon
+Firmware images are available in the Releases section.
 
----
-
-## Firmware Images
-
-Each release provides both BIOS and UEFI images:
-
-- *combined.img.gz (Legacy BIOS)
-- *combined-efi.img.gz (UEFI)
+This repository provides multiple variants for different boot modes and filesystem types.
 
 ---
 
-## Installation
+## Firmware Variants
 
-Write image to disk (Linux):
+This project generates 4 main firmware images:
 
-gzip -dc openwrt-*.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
-
-Replace /dev/sdX with your target disk.
-
----
-
-## Proxmox / Virtual Machine
-
-You can import the image into Proxmox as a disk:
-
-qm importdisk <VMID> openwrt-*.img local-lvm
-
-Then attach it as the boot disk.
+- squashfs BIOS
+- squashfs UEFI
+- ext4 BIOS
+- ext4 UEFI
 
 ---
 
-## Web UI Access
+## Recommended Choice
 
-After booting, OpenWrt will obtain an IP address via DHCP.
+For most users, the recommended firmware is:
 
-Access LuCI Web UI:
+- squashfs UEFI image
 
-https://OPENWRT_IP/
+If your system does not support UEFI or uses legacy boot mode, use:
 
-Replace OPENWRT_IP with the IP address assigned by your DHCP server.
-
-Default login:
-
-- Username: root
-- Password: (empty)
-
-You should set a root password immediately.
+- squashfs BIOS image
 
 ---
 
-## Upgrading
+## File Naming
 
-This build is based on official OpenWrt releases.
+Released firmware images follow this naming format:
 
-To upgrade, download a newer image from Releases and flash it.
+HarryWrt-24.10.5-clean-vX.X-x86_64-squashfs-uefi.img.gz
+HarryWrt-24.10.5-clean-vX.X-x86_64-squashfs-bios.img.gz
+HarryWrt-24.10.5-clean-vX.X-x86_64-ext4-uefi.img.gz
+HarryWrt-24.10.5-clean-vX.X-x86_64-ext4-bios.img.gz
+
+---
+
+## BIOS vs UEFI
+
+BIOS images are for legacy boot mode.
+UEFI images are for modern systems using UEFI boot mode.
+
+If you are using Proxmox VE, you can select BIOS or UEFI in the VM settings.
+
+---
+
+## squashfs vs ext4
+
+squashfs images are recommended for most users because they provide better stability.
+
+- squashfs is read-only with overlay storage
+- safer for upgrades and long-term use
+- harder to corrupt by mistake
+
+ext4 images are designed for advanced users.
+
+- ext4 root filesystem is fully writable
+- easier to modify system files directly
+- higher risk of accidental corruption
+
+---
+
+## Integrity Verification
+
+Each release includes a SHA256SUMS file.
+
+You can verify the downloaded firmware image using:
+
+sha256sum -c SHA256SUMS
 
 ---
 
 ## Build System
 
-Builds are automated via GitHub Actions.
+Firmware images are built automatically using GitHub Actions.
 
-Source base:
-
-- OpenWrt: v24.10.5
+The workflow compiles OpenWrt from the official OpenWrt repository and applies a minimal customization layer via the diy.sh script.
 
 ---
 
-## Release Tags
+## Included Packages
 
-Tag format:
+This build includes a minimal but practical set of packages:
 
-- clean-24.10.5-vX.Y
+- LuCI Web UI (HTTPS)
+- luci-theme-argon
+- luci-compat
+- bash
+- curl
+- htop
+- ip-full
+- iperf3
+- tcpdump
+- ethtool
+- nftables
+- iptables-nft
+- kmod-tun
+- ca-bundle
+- openssl-util
 
-Example:
+---
 
-- clean-24.10.5-v1.0
+## Default Login
+
+The default OpenWrt image does not set a root password.
+
+On first boot, set a password immediately via the LuCI Web UI or SSH.
+
+---
+
+## Web UI Access
+
+After booting, the LAN interface uses the default IP address:
+
+https://192.168.1.1
+
+If your network already uses 192.168.1.0/24 or has an existing DHCP server, the address may be different.
+Check your router/DHCP client list to find the assigned IP.
 
 ---
 
 ## License
 
-This repository provides build scripts and configuration only.
+This project is based on OpenWrt.
 
 OpenWrt is licensed under GPL-2.0.
 
----
-
-## Disclaimer
-
-This project is provided as-is, without warranty.
-Use at your own risk.
+All modifications and build scripts in this repository follow the same open-source principles.
