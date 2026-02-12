@@ -70,11 +70,7 @@ jobs:
             rel="${{ inputs.release_version }}"
           else
             tag="${GITHUB_REF##*/}"
-            if [[ "${{ matrix.id }}" == "clean" ]]; then
-              rel=$(echo "$tag" | grep -oE 'v[0-9]+(\.[0-9]+){0,2}')
-            else
-              rel=$(echo "$tag" | grep -oE 'v[0-9]+(\.[0-9]+){0,2}')
-            fi
+            rel=$(echo "$tag" | grep -oE 'v[0-9]+(\.[0-9]+){0,2}' || echo "v1.0")
           fi
           echo "release=$rel" >> "$GITHUB_OUTPUT"
 
@@ -109,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
-          : > openwrt/build.log
+          touch openwrt/build.log
 
       - name: Add Passwall feeds
         if: matrix.add_passwall == 'true'
@@ -120,20 +116,19 @@ jobs:
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
           echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
 
-      - name: Update and install feeds (with Surgeon Fix)
+      - name: Update and install feeds (Surgeon Edition)
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
 
-          ./scripts/feeds update -a -f 2>&1 | tee -a build.log
+          ./scripts/feeds update -a -f
 
-          # 【核心外科手術】在 install 前修正依賴錯誤
           if [[ "${{ matrix.add_passwall }}" == "true" ]]; then
-            echo "Applying dependency patches..."
-            # 1. 物理刪除導致報錯的組件
+            echo "Patching Passwall2 dependencies..."
+            # 1. 物理移除報錯源碼
             rm -rf feeds/passwall_packages/geoview || true
-            # 2. 修改 Makefile，移除強制依賴，避免 install -a 報錯
+            # 2. 修改 Makefile 移除強依賴項
             if [ -f feeds/passwall2/luci-app-passwall2/Makefile ]; then
               sed -i 's/+geoview//g' feeds/passwall2/luci-app-passwall2/Makefile
               sed -i 's/+v2ray-geoip//g' feeds/passwall2/luci-app-passwall2/Makefile
@@ -141,9 +136,8 @@ jobs:
             fi
           fi
 
-          ./scripts/feeds install -a -f 2>&1 | tee -a build.log
+          ./scripts/feeds install -a -f
 
-          # 解決 dnsmasq 衝突
           if [[ "${{ matrix.add_passwall }}" == "true" ]]; then
             ./scripts/feeds uninstall dnsmasq 2>/dev/null || true
           fi
@@ -162,7 +156,15 @@ jobs:
           set -euo pipefail
           cd openwrt
 
-          cp "../${{ matrix.config }}" .config
+          # 使用絕對路徑準確定位 config 文件
+          CONFIG_FILE="$GITHUB_WORKSPACE/${{ matrix.config }}"
+          if [ -f "$CONFIG_FILE" ]; then
+            cp "$CONFIG_FILE" .config
+            echo "Using config: $CONFIG_FILE"
+          else
+            echo "ERROR: Config file not found at $CONFIG_FILE"
+            exit 1
+          fi
 
           if [[ "${{ matrix.add_passwall }}" == "true" ]]; then
             force_n() {
@@ -171,7 +173,7 @@ jobs:
               sed -i "/^# ${key} is not set$/d" .config
               echo "# ${key} is not set" >> .config
             }
-            # 強制屏蔽 Rust 相關組件
+            # 強制屏蔽 Rust 及其它不穩定組件
             force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client
             force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server
             force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_tuic_client
@@ -180,33 +182,38 @@ jobs:
             force_n CONFIG_PACKAGE_geoview
           fi
 
-          chmod +x ../scripts/diy.sh
-          bash ../scripts/diy.sh 2>&1 | tee -a build.log
-          make defconfig 2>&1 | tee -a build.log
+          # 執行 DIY 腳本（路徑加強版）
+          DIY_PATH="$GITHUB_WORKSPACE/scripts/diy.sh"
+          if [ -f "$DIY_PATH" ]; then
+            chmod +x "$DIY_PATH"
+            bash "$DIY_PATH"
+          fi
+
+          make defconfig
 
       - name: Download sources
         shell: bash
         run: |
           cd openwrt
-          make download -j8 2>&1 | tee -a build.log
+          make download -j8
 
       - name: Build firmware
         shell: bash
         run: |
           cd openwrt
-          # 首次嘗試使用 2 核編譯，提高穩定性
-          make -j2 2>&1 | tee -a build.log || make -j1 V=s 2>&1 | tee -a build.log
+          # 2核編譯最穩定
+          make -j2 || make -j1 V=s
 
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: HarryWrt-Log-${{ matrix.name }}-${{ steps.meta.outputs.release }}
+          name: Log-${{ matrix.id }}-${{ steps.meta.outputs.release }}
           path: openwrt/build.log
 
       - name: Upload firmware
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: HarryWrt-Image-${{ matrix.name }}-${{ steps.meta.outputs.release }}
+          name: HarryWrt-${{ matrix.id }}-${{ steps.meta.outputs.release }}
           path: openwrt/bin/targets/x86/64/*combined*.img.gz
