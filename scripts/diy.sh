@@ -1,3 +1,5 @@
+# File: scripts/diy.sh
+
 #!/usr/bin/env bash
 set -euo pipefail
 
