@@ -151,7 +151,7 @@ jobs:
         run: |
           set -euo pipefail
           cd openwrt
-          make -j$(nproc) 2>&1 | tee -a build.log
+          make -j$(nproc) 2>&1 | tee -a build.log || (make -j1 V=s 2>&1 | tee -a build.log && exit 1)
 
       - name: Upload build log
         if: always()
@@ -257,7 +257,6 @@ jobs:
 
           ./scripts/feeds update -a -f 2>&1 | tee -a build.log
 
-          # Prevent dnsmasq vs dnsmasq-full edge cases
           ./scripts/feeds uninstall -a dnsmasq || true
 
           ./scripts/feeds install -f -p packages \
@@ -307,8 +306,14 @@ jobs:
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY
 
-          # Optional: disable LuCI web package manager by config (do not delete sources)
           force_n CONFIG_PACKAGE_luci-app-package-manager
+
+          # Workaround for geoview build failures on some runners/feeds states
+          force_n CONFIG_PACKAGE_geoview
+          # Optional: also disable geo data packages if you want maximum stability
+          # force_n CONFIG_PACKAGE_v2ray-geodata
+          # force_n CONFIG_PACKAGE_v2ray-geoip
+          # force_n CONFIG_PACKAGE_v2ray-geosite
 
           chmod +x ../scripts/diy.sh
           bash ../scripts/diy.sh 2>&1 | tee -a build.log
@@ -346,7 +351,7 @@ jobs:
         run: |
           set -euo pipefail
           cd openwrt
-          make -j$(nproc) 2>&1 | tee -a build.log
+          make -j$(nproc) 2>&1 | tee -a build.log || (make -j1 V=s 2>&1 | tee -a build.log && exit 1)
 
       - name: Upload build log
         if: always()
