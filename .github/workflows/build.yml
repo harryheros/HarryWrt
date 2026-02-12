@@ -257,10 +257,8 @@ jobs:
 
           ./scripts/feeds update -a -f 2>&1 | tee -a build.log
 
-          # Prevent dnsmasq vs dnsmasq-full edge cases
           ./scripts/feeds uninstall -a dnsmasq || true
 
-          # Robust mode: install full definitions for passwall feeds to avoid "missing package" dump failures
           ./scripts/feeds install -a -p passwall_packages -f 2>&1 | tee -a build.log || true
           ./scripts/feeds install -a -p passwall2 -f 2>&1 | tee -a build.log || {
             echo "feeds install failed; printing dump.txt (if any)..." | tee -a build.log
@@ -268,7 +266,6 @@ jobs:
             exit 1
           }
 
-          # Install only the packages we actually want enabled (definitions are already present)
           ./scripts/feeds install -f -p packages \
             luci luci-ssl luci-theme-argon \
             bash curl htop \
@@ -302,21 +299,16 @@ jobs:
             echo "# ${key} is not set" >> .config
           }
 
-          # Hard-disable Rust/Cargo
           force_n CONFIG_PACKAGE_rust
           force_n CONFIG_PACKAGE_cargo
 
-          # Disable optional components (avoid rust-related toolchains)
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY
 
-          # Disable geoview (not required for runtime; avoids build failures)
           force_n CONFIG_PACKAGE_geoview
-
-          # Disable LuCI web package manager (optional)
           force_n CONFIG_PACKAGE_luci-app-package-manager
 
           chmod +x ../scripts/diy.sh
@@ -324,29 +316,28 @@ jobs:
 
           make defconfig 2>&1 | tee -a build.log || { echo "defconfig failed"; tail -n 200 build.log; exit 1; }
 
-# Post-defconfig sanity checks (do not fail on missing symbols; fail only if enabled)
-echo "Sanity check: rust/cargo/geoview status in .config" | tee -a build.log
+          echo "Sanity check: rust/cargo/geoview status in .config" | tee -a build.log
 
-for k in CONFIG_PACKAGE_rust CONFIG_PACKAGE_cargo CONFIG_PACKAGE_geoview; do
-  echo "--- ${k} ---" | tee -a build.log
-  grep -nE "^${k}=" .config | tee -a build.log || true
-  grep -nE "^# ${k} is not set$" .config | tee -a build.log || true
-done
+          for k in CONFIG_PACKAGE_rust CONFIG_PACKAGE_cargo CONFIG_PACKAGE_geoview; do
+            echo "--- ${k} ---" | tee -a build.log
+            grep -nE "^${k}=" .config | tee -a build.log || true
+            grep -nE "^# ${k} is not set$" .config | tee -a build.log || true
+          done
 
-if grep -qE '^CONFIG_PACKAGE_rust=y$' .config; then
-  echo "ERROR: rust is enabled by dependency tree." | tee -a build.log
-  exit 1
-fi
+          if grep -qE '^CONFIG_PACKAGE_rust=y$' .config; then
+            echo "ERROR: rust is enabled by dependency tree." | tee -a build.log
+            exit 1
+          fi
 
-if grep -qE '^CONFIG_PACKAGE_cargo=y$' .config; then
-  echo "ERROR: cargo is enabled by dependency tree." | tee -a build.log
-  exit 1
-fi
+          if grep -qE '^CONFIG_PACKAGE_cargo=y$' .config; then
+            echo "ERROR: cargo is enabled by dependency tree." | tee -a build.log
+            exit 1
+          fi
 
-if grep -qE '^CONFIG_PACKAGE_geoview=y$' .config; then
-  echo "ERROR: geoview is enabled by dependency tree." | tee -a build.log
-  exit 1
-fi
+          if grep -qE '^CONFIG_PACKAGE_geoview=y$' .config; then
+            echo "ERROR: geoview is enabled by dependency tree." | tee -a build.log
+            exit 1
+          fi
 
       - name: Download sources
         shell: bash
