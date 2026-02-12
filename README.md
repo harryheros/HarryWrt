@@ -92,7 +92,9 @@ After booting, OpenWrt will obtain an IP address via DHCP.
 
 Access LuCI Web UI:
 
-https://192.168.1.1/
+https://OPENWRT_IP/
+
+Replace OPENWRT_IP with the IP address assigned by your DHCP server.
 
 Default login:
 
