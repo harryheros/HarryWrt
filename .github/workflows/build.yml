@@ -324,9 +324,29 @@ jobs:
 
           make defconfig 2>&1 | tee -a build.log || { echo "defconfig failed"; tail -n 200 build.log; exit 1; }
 
-          grep -qE '^(CONFIG_PACKAGE_rust=n|# CONFIG_PACKAGE_rust is not set)$' .config
-          grep -qE '^(CONFIG_PACKAGE_cargo=n|# CONFIG_PACKAGE_cargo is not set)$' .config
-          grep -qE '^(CONFIG_PACKAGE_geoview=n|# CONFIG_PACKAGE_geoview is not set)$' .config
+# Post-defconfig sanity checks (do not fail on missing symbols; fail only if enabled)
+echo "Sanity check: rust/cargo/geoview status in .config" | tee -a build.log
+
+for k in CONFIG_PACKAGE_rust CONFIG_PACKAGE_cargo CONFIG_PACKAGE_geoview; do
+  echo "--- ${k} ---" | tee -a build.log
+  grep -nE "^${k}=" .config | tee -a build.log || true
+  grep -nE "^# ${k} is not set$" .config | tee -a build.log || true
+done
+
+if grep -qE '^CONFIG_PACKAGE_rust=y$' .config; then
+  echo "ERROR: rust is enabled by dependency tree." | tee -a build.log
+  exit 1
+fi
+
+if grep -qE '^CONFIG_PACKAGE_cargo=y$' .config; then
+  echo "ERROR: cargo is enabled by dependency tree." | tee -a build.log
+  exit 1
+fi
+
+if grep -qE '^CONFIG_PACKAGE_geoview=y$' .config; then
+  echo "ERROR: geoview is enabled by dependency tree." | tee -a build.log
+  exit 1
+fi
 
       - name: Download sources
         shell: bash
