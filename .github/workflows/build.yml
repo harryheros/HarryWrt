@@ -8,10 +8,7 @@ on:
         required: true
         default: "both"
         type: choice
-        options:
-          - both
-          - clean
-          - passwall2
+        options: [both, clean, passwall2]
       release_version:
         description: "Release version (e.g. v1.0)"
         required: true
@@ -43,22 +40,53 @@ jobs:
             name: Clean
             config: configs/x86_64-clean.config
             add_passwall: "false"
+            tag_prefix: "clean-24.10.5-"
           - id: passwall2
             name: Passwall2
             config: configs/x86_64-passwall2.config
             add_passwall: "true"
-
-    if: |
-      github.event_name == 'workflow_dispatch' && (
-        github.event.inputs.profile == 'both' ||
-        github.event.inputs.profile == matrix.id
-      ) || (
-        matrix.id == 'clean' && startsWith(github.ref, 'refs/tags/clean-24.10.5-v')
-      ) || (
-        matrix.id == 'passwall2' && startsWith(github.ref, 'refs/tags/pw2-24.10.5-v')
-      )
+            tag_prefix: "pw2-24.10.5-"
 
     steps:
+      - name: Gate (profile/tag filter)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          ref="${{ github.ref }}"
+          profile="${{ github.event.inputs.profile || 'both' }}"
+          prefix="${{ matrix.tag_prefix }}"
+          mid="${{ matrix.id }}"
+
+          echo "event=$event"
+          echo "ref=$ref"
+          echo "profile=$profile"
+          echo "matrix_id=$mid"
+          echo "tag_prefix=$prefix"
+
+          if [[ "$event" == "workflow_dispatch" ]]; then
+            if [[ "$profile" == "both" || "$profile" == "$mid" ]]; then
+              echo "Selected by workflow_dispatch profile."
+              exit 0
+            fi
+            echo "Not selected by workflow_dispatch profile. Skipping."
+            exit 0
+          fi
+
+          if [[ "$ref" == refs/tags/* ]]; then
+            tag="${ref#refs/tags/}"
+            if [[ "$tag" == ${prefix}v* ]]; then
+              echo "Selected by tag: $tag"
+              exit 0
+            fi
+            echo "Tag does not match this matrix. Skipping."
+            exit 0
+          fi
+
+          echo "Unsupported event. Skipping."
+          exit 0
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
