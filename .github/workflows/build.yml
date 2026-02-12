@@ -1,0 +1,211 @@
+name: Build HarryWrt (OpenWrt 24.10.5 x86_64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "Select firmware profile"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - both
+          - clean
+          - passwall2
+
+      release_version:
+        description: "HarryWrt release version (e.g. v1.0)"
+        required: true
+        default: "v1.0"
+        type: string
+
+  push:
+    tags:
+      - "clean-24.10.5-v*"
+      - "pw2-24.10.5-v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: clean
+            profile_name: Clean
+            config_file: configs/x86_64-clean.config
+            add_passwall_feeds: false
+            enforce_no_rust: false
+
+          - id: passwall2
+            profile_name: Passwall2
+            config_file: configs/x86_64-passwall2.config
+            add_passwall_feeds: true
+            enforce_no_rust: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine build metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base="24.10.5"
+          profile=""
+          rel=""
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            case "${{ inputs.profile }}" in
+              both)
+                profile="${{ matrix.id }}"
+                ;;
+              clean)
+                profile="clean"
+                ;;
+              passwall2)
+                profile="pw2"
+                ;;
+            esac
+            rel="${{ inputs.release_version }}"
+          else
+            tag="${GITHUB_REF##*/}"
+
+            # Expected formats:
+            # clean-24.10.5-v1.0
+            # pw2-24.10.5-v1.0
+            if [[ "$tag" =~ ^(clean|pw2)-24\.10\.5-(v[0-9]+(\.[0-9]+){0,2})$ ]]; then
+              profile="${BASH_REMATCH[1]}"
+              rel="${BASH_REMATCH[2]}"
+            else
+              echo "Invalid tag format: $tag"
+              exit 1
+            fi
+          fi
+
+          # Map tag profile to matrix id
+          want_matrix="no"
+          if [[ "$profile" == "clean" && "${{ matrix.id }}" == "clean" ]]; then want_matrix="yes"; fi
+          if [[ "$profile" == "pw2" && "${{ matrix.id }}" == "passwall2" ]]; then want_matrix="yes"; fi
+
+          # workflow_dispatch "both" will set profile to matrix.id above
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.profile }}" == "both" ]]; then
+            want_matrix="yes"
+          fi
+
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "release=$rel" >> "$GITHUB_OUTPUT"
+          echo "want=$want_matrix" >> "$GITHUB_OUTPUT"
+
+      - name: Skip unselected profile
+        if: steps.meta.outputs.want != 'yes'
+        run: |
+          echo "Skipping profile: ${{ matrix.profile_name }}"
+          exit 0
+
+      - name: Free disk space and enable swap
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell || true
+
+          sudo fallocate -l 8G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang flex bison g++ gawk gettext git \
+            libncurses-dev libssl-dev python3-setuptools rsync unzip zlib1g-dev \
+            file wget curl ca-certificates gcc-multilib g++-multilib time
+
+      - name: Clone OpenWrt source
+        run: |
+          git clone --depth=1 --branch v24.10.5 https://github.com/openwrt/openwrt.git openwrt
+
+      - name: Add Passwall feeds
+        if: matrix.add_passwall_feeds
+        run: |
+          set -euo pipefail
+          cd openwrt
+          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
+          echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
+
+      - name: Update and install feeds
+        run: |
+          set -euo pipefail
+          cd openwrt
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Cache downloads (dl)
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: dl-cache-${{ matrix.id }}-${{ runner.os }}-${{ steps.meta.outputs.base }}-${{ hashFiles('openwrt/feeds.conf.default') }}
+          restore-keys: |
+            dl-cache-${{ matrix.id }}-${{ runner.os }}-${{ steps.meta.outputs.base }}-
+            dl-cache-${{ matrix.id }}-${{ runner.os }}-
+            dl-cache-
+
+      - name: Apply config and run DIY
+        run: |
+          set -euo pipefail
+          cd openwrt
+
+          if [ -f "../${{ matrix.config_file }}" ]; then
+            cp "../${{ matrix.config_file }}" .config
+          else
+            touch .config
+          fi
+
+          if [[ "${{ matrix.enforce_no_rust }}" == "true" ]]; then
+            ./scripts/config set CONFIG_PACKAGE_rust n
+            ./scripts/config set CONFIG_PACKAGE_cargo n
+            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT n
+            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER n
+            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2 n
+            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS n
+            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY n
+          fi
+
+          chmod +x ../scripts/diy.sh
+          bash ../scripts/diy.sh
+
+          make defconfig
+
+          if [[ "${{ matrix.enforce_no_rust }}" == "true" ]]; then
+            grep -q '^CONFIG_PACKAGE_rust=n' .config
+            grep -q '^CONFIG_PACKAGE_cargo=n' .config
+          fi
+
+      - name: Download sources
+        run: |
+          set -euo pipefail
+          cd openwrt
+          make download -j$(nproc)
+
+      - name: Build firmware
+        run: |
+          set -euo pipefail
+          cd openwrt
+          make -j$(nproc) 2>&1 | tee build.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: HarryWrt-${{ steps.meta.outputs.base }}-${{ steps.meta.outputs.release }}-${{ matrix.profile_name }}-x86_64-log
+          path: openwrt/build.log
+
+      - name: Upload firmware artifacts (BIOS + UEFI)
+        uses: actions/upload-artifact@v4
+        with:
+          name: HarryWrt-${{ steps.meta.outputs.base }}-${{ steps.meta.outputs.release }}-${{ matrix.profile_name }}-x86_64
+          path: openwrt/bin/targets/x86/64/*combined*.img.gz
