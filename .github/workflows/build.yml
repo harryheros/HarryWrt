@@ -172,7 +172,7 @@ jobs:
           set -euo pipefail
           cd openwrt
 
-          echo "feeds.conf.default:"
+          echo "feeds.conf.default:" | tee -a build.log
           sed -n '1,200p' feeds.conf.default | tee -a build.log
 
           ./scripts/feeds update -a -f 2>&1 | tee -a build.log
@@ -213,17 +213,30 @@ jobs:
           if [ -f "../${{ matrix.config_file }}" ]; then
             cp "../${{ matrix.config_file }}" .config
           else
-            touch .config
+            : > .config
           fi
 
+          # Helper to force a .config key to y/m/n (without using scripts/config)
+          set_kconfig() {
+            local key="$1"
+            local val="$2"
+            if grep -qE "^${key}=" .config; then
+              sed -i "s#^${key}=.*#${key}=${val}#g" .config
+            elif grep -qE "^# ${key} is not set" .config; then
+              sed -i "s#^# ${key} is not set#${key}=${val}#g" .config
+            else
+              echo "${key}=${val}" >> .config
+            fi
+          }
+
           if [[ "${{ matrix.enforce_no_rust }}" == "true" ]]; then
-            ./scripts/config set CONFIG_PACKAGE_rust n
-            ./scripts/config set CONFIG_PACKAGE_cargo n
-            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT n
-            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER n
-            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2 n
-            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS n
-            ./scripts/config set CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY n
+            set_kconfig CONFIG_PACKAGE_rust n
+            set_kconfig CONFIG_PACKAGE_cargo n
+            set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT n
+            set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER n
+            set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2 n
+            set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS n
+            set_kconfig CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY n
           fi
 
           chmod +x ../scripts/diy.sh
