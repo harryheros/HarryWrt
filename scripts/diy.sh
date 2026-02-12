@@ -1,12 +1,13 @@
-# File: scripts/diy.sh
-
 #!/usr/bin/env bash
 set -euo pipefail
 
-mkdir -p files/etc/config
-mkdir -p files/etc/uci-defaults
+FILES_DIR="files"
+UCI_DEFAULTS_DIR="${FILES_DIR}/etc/uci-defaults"
+CFG_DIR="${FILES_DIR}/etc/config"
 
-cat > files/etc/config/system <<'EOF'
+mkdir -p "${CFG_DIR}" "${UCI_DEFAULTS_DIR}"
+
+cat > "${CFG_DIR}/system" <<'EOF'
 config system
   option hostname 'HarryWrt'
   option timezone 'HKT-8'
@@ -17,7 +18,7 @@ config system
   option cronloglevel '5'
 EOF
 
-cat > files/etc/banner <<'EOF'
+cat > "${FILES_DIR}/etc/banner" <<'EOF'
 ---------------------------------------------------------------
  _   _                           _  _   _  ____  _____
 | | | | __ _ _ __ _ __ _   _    | || | | ||  _ \|_   _|
@@ -30,7 +31,7 @@ cat > files/etc/banner <<'EOF'
 ---------------------------------------------------------------
 EOF
 
-cat > files/etc/uci-defaults/99-harrywrt-settings <<'EOF'
+cat > "${UCI_DEFAULTS_DIR}/99-harrywrt-settings" <<'EOF'
 #!/bin/sh
 
 uci -q set luci.main.mediaurlbase='/luci-static/argon'
@@ -39,6 +40,6 @@ uci -q commit luci
 exit 0
 EOF
 
-chmod +x files/etc/uci-defaults/99-harrywrt-settings
+chmod 0755 "${UCI_DEFAULTS_DIR}/99-harrywrt-settings"
 
 echo "DIY script executed successfully."
