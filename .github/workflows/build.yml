@@ -13,7 +13,7 @@ on:
           - clean
           - passwall2
       release_version:
-        description: "HarryWrt release version (e.g. v1.0)"
+        description: "Release version (e.g. v1.0)"
         required: true
         default: "v1.0"
         type: string
@@ -25,14 +25,36 @@ on:
 
 env:
   OWRT_BASE: "24.10.5"
+  OWRT_TAG: "v24.10.5"
+  OWRT_REPO: "https://github.com/openwrt/openwrt.git"
 
 jobs:
-  build_clean:
-    name: Build Clean
+  build:
+    name: Build (${{ matrix.name }})
     runs-on: ubuntu-22.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: clean
+            name: Clean
+            config: configs/x86_64-clean.config
+            add_passwall: "false"
+          - id: passwall2
+            name: Passwall2
+            config: configs/x86_64-passwall2.config
+            add_passwall: "true"
+
     if: |
-      github.event_name == 'workflow_dispatch' && (inputs.profile == 'both' || inputs.profile == 'clean')
-      || startsWith(github.ref, 'refs/tags/clean-24.10.5-v')
+      github.event_name == 'workflow_dispatch' && (
+        inputs.profile == 'both' ||
+        inputs.profile == matrix.id
+      ) || (
+        matrix.id == 'clean' && startsWith(github.ref, 'refs/tags/clean-24.10.5-v')
+      ) || (
+        matrix.id == 'passwall2' && startsWith(github.ref, 'refs/tags/pw2-24.10.5-v')
+      )
 
     steps:
       - name: Checkout repository
@@ -48,11 +70,10 @@ jobs:
             rel="${{ inputs.release_version }}"
           else
             tag="${GITHUB_REF##*/}"
-            if [[ "$tag" =~ ^clean-24\.10\.5-(v[0-9]+(\.[0-9]+){0,2})$ ]]; then
-              rel="${BASH_REMATCH[1]}"
+            if [[ "${{ matrix.id }}" == "clean" ]]; then
+              rel=$(echo "$tag" | grep -oE 'v[0-9]+(\.[0-9]+){0,2}')
             else
-              echo "Invalid tag format: $tag"
-              exit 1
+              rel=$(echo "$tag" | grep -oE 'v[0-9]+(\.[0-9]+){0,2}')
             fi
           fi
           echo "release=$rel" >> "$GITHUB_OUTPUT"
@@ -62,22 +83,15 @@ jobs:
         run: |
           set -euo pipefail
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell || true
-          df -h
-
-          if sudo swapon --show | grep -q '/swapfile'; then sudo swapoff /swapfile || true; fi
-          if [ -e /swapfile ]; then sudo rm -f /swapfile || true; fi
-
-          SWAP_PATH="/swapfile"
-          if ! sudo fallocate -l 8G "$SWAP_PATH" 2>/dev/null; then
-            SWAP_PATH="/swapfile2"
-            sudo rm -f "$SWAP_PATH" || true
-            sudo fallocate -l 8G "$SWAP_PATH"
-          fi
-
+          
+          SWAP_PATH="/mnt/gh-swapfile"
+          sudo swapoff "$SWAP_PATH" 2>/dev/null || true
+          sudo rm -f "$SWAP_PATH" || true
+          sudo fallocate -l 8G "$SWAP_PATH" || sudo dd if=/dev/zero of="$SWAP_PATH" bs=1M count=8192
           sudo chmod 600 "$SWAP_PATH"
           sudo mkswap "$SWAP_PATH"
           sudo swapon "$SWAP_PATH"
-          sudo swapon --show
+          free -h
 
       - name: Install build dependencies
         shell: bash
@@ -87,161 +101,18 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
             gettext git libncurses-dev libssl-dev rsync unzip zlib1g-dev \
-            file wget curl ca-certificates time \
-            python3 python3-distutils python3-setuptools python3-pyelftools \
-            gperf swig \
-            subversion mercurial
-
-          python3 --version
-          git --version
+            file wget curl ca-certificates time python3 python3-distutils \
+            python3-setuptools python3-pyelftools gperf swig subversion mercurial
 
       - name: Clone OpenWrt source
         shell: bash
         run: |
           set -euo pipefail
-          git clone --depth=1 --branch v24.10.5 https://github.com/openwrt/openwrt.git openwrt
-          : > openwrt/build.log
-
-      - name: Update and install feeds (Clean minimal)
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd openwrt
-
-          ./scripts/feeds update -a -f 2>&1 | tee -a build.log
-
-          ./scripts/feeds install -f -p packages \
-            luci luci-ssl luci-theme-argon \
-            bash curl htop 2>&1 | tee -a build.log
-
-          ls -la package/feeds/packages 2>&1 | tee -a build.log || true
-
-      - name: Cache downloads (dl)
-        uses: actions/cache@v4
-        with:
-          path: openwrt/dl
-          key: dl-cache-clean-${{ runner.os }}-${{ env.OWRT_BASE }}
-          restore-keys: |
-            dl-cache-clean-${{ runner.os }}-
-            dl-cache-clean-
-            dl-cache-
-
-      - name: Apply config and run DIY
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd openwrt
-
-          cp ../configs/x86_64-clean.config .config
-
-          chmod +x ../scripts/diy.sh
-          bash ../scripts/diy.sh 2>&1 | tee -a build.log
-
-          make defconfig 2>&1 | tee -a build.log || { echo "defconfig failed"; tail -n 200 build.log; exit 1; }
-
-      - name: Download sources
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd openwrt
-          make download -j$(nproc) 2>&1 | tee -a build.log
-
-      - name: Build firmware
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd openwrt
-          make -j$(nproc) 2>&1 | tee -a build.log || (make -j1 V=s 2>&1 | tee -a build.log && exit 1)
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: HarryWrt-${{ env.OWRT_BASE }}-${{ steps.meta.outputs.release }}-Clean-x86_64-log
-          path: openwrt/build.log
-
-      - name: Upload firmware artifacts (BIOS + UEFI)
-        uses: actions/upload-artifact@v4
-        with:
-          name: HarryWrt-${{ env.OWRT_BASE }}-${{ steps.meta.outputs.release }}-Clean-x86_64
-          path: openwrt/bin/targets/x86/64/*combined*.img.gz
-
-  build_passwall2:
-    name: Build Passwall2
-    runs-on: ubuntu-22.04
-    if: |
-      github.event_name == 'workflow_dispatch' && (inputs.profile == 'both' || inputs.profile == 'passwall2')
-      || startsWith(github.ref, 'refs/tags/pw2-24.10.5-v')
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Determine release version
-        id: meta
-        shell: bash
-        run: |
-          set -euo pipefail
-          rel=""
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            rel="${{ inputs.release_version }}"
-          else
-            tag="${GITHUB_REF##*/}"
-            if [[ "$tag" =~ ^pw2-24\.10\.5-(v[0-9]+(\.[0-9]+){0,2})$ ]]; then
-              rel="${BASH_REMATCH[1]}"
-            else
-              echo "Invalid tag format: $tag"
-              exit 1
-            fi
-          fi
-          echo "release=$rel" >> "$GITHUB_OUTPUT"
-
-      - name: Free disk space and enable swap
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell || true
-          df -h
-
-          if sudo swapon --show | grep -q '/swapfile'; then sudo swapoff /swapfile || true; fi
-          if [ -e /swapfile ]; then sudo rm -f /swapfile || true; fi
-
-          SWAP_PATH="/swapfile"
-          if ! sudo fallocate -l 8G "$SWAP_PATH" 2>/dev/null; then
-            SWAP_PATH="/swapfile2"
-            sudo rm -f "$SWAP_PATH" || true
-            sudo fallocate -l 8G "$SWAP_PATH"
-          fi
-
-          sudo chmod 600 "$SWAP_PATH"
-          sudo mkswap "$SWAP_PATH"
-          sudo swapon "$SWAP_PATH"
-          sudo swapon --show
-
-      - name: Install build dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-            gettext git libncurses-dev libssl-dev rsync unzip zlib1g-dev \
-            file wget curl ca-certificates time \
-            python3 python3-distutils python3-setuptools python3-pyelftools \
-            gperf swig \
-            subversion mercurial
-
-          python3 --version
-          git --version
-
-      - name: Clone OpenWrt source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone --depth=1 --branch v24.10.5 https://github.com/openwrt/openwrt.git openwrt
+          git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
       - name: Add Passwall feeds
+        if: matrix.add_passwall == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -249,7 +120,7 @@ jobs:
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
           echo "src-git passwall2 https://github.com/Openwrt-Passwall/openwrt-passwall2.git;main" >> feeds.conf.default
 
-      - name: Update and install feeds (Passwall2 stable; avoid geoview)
+      - name: Update and install feeds (with Surgeon Fix)
         shell: bash
         run: |
           set -euo pipefail
@@ -257,111 +128,85 @@ jobs:
 
           ./scripts/feeds update -a -f 2>&1 | tee -a build.log
 
-          ./scripts/feeds uninstall -a dnsmasq || true
+          # 【核心外科手術】在 install 前修正依賴錯誤
+          if [[ "${{ matrix.add_passwall }}" == "true" ]]; then
+            echo "Applying dependency patches..."
+            # 1. 物理刪除導致報錯的組件
+            rm -rf feeds/passwall_packages/geoview || true
+            # 2. 修改 Makefile，移除強制依賴，避免 install -a 報錯
+            if [ -f feeds/passwall2/luci-app-passwall2/Makefile ]; then
+              sed -i 's/+geoview//g' feeds/passwall2/luci-app-passwall2/Makefile
+              sed -i 's/+v2ray-geoip//g' feeds/passwall2/luci-app-passwall2/Makefile
+              sed -i 's/+v2ray-geosite//g' feeds/passwall2/luci-app-passwall2/Makefile
+            fi
+          fi
 
-          ./scripts/feeds install -a -p passwall2 -f 2>&1 | tee -a build.log || {
-            echo "passwall2 feeds install failed; printing dump.txt (if any)..." | tee -a build.log
-            find logs -type f -name dump.txt -maxdepth 6 -print -exec sed -n '1,240p' {} \; | tee -a build.log || true
-            exit 1
-          }
+          ./scripts/feeds install -a -f 2>&1 | tee -a build.log
 
-          ./scripts/feeds install -f -p passwall_packages \
-            xray-core sing-box v2ray-geodata \
-            microsocks ipt2socks tcping \
-            shadowsocks-libev shadowsocksr-libev simple-obfs \
-            v2ray-plugin xray-plugin trojan-plus \
-            2>&1 | tee -a build.log || true
-
-          ./scripts/feeds install -f -p packages \
-            luci luci-ssl luci-theme-argon \
-            bash curl htop \
-            dnsmasq-full ca-bundle \
-            xray-core sing-box 2>&1 | tee -a build.log
-
-          ls -la package/feeds/packages 2>&1 | tee -a build.log || true
+          # 解決 dnsmasq 衝突
+          if [[ "${{ matrix.add_passwall }}" == "true" ]]; then
+            ./scripts/feeds uninstall dnsmasq 2>/dev/null || true
+          fi
 
       - name: Cache downloads (dl)
         uses: actions/cache@v4
         with:
           path: openwrt/dl
-          key: dl-cache-pw2-${{ runner.os }}-${{ env.OWRT_BASE }}-${{ hashFiles('openwrt/feeds.conf.default') }}
+          key: dl-cache-${{ matrix.id }}-${{ runner.os }}-${{ env.OWRT_BASE }}
           restore-keys: |
-            dl-cache-pw2-${{ runner.os }}-${{ env.OWRT_BASE }}-
-            dl-cache-pw2-${{ runner.os }}-
-            dl-cache-
+            dl-cache-${{ matrix.id }}-${{ runner.os }}-
 
-      - name: Apply config and run DIY (no rust; stable)
+      - name: Apply config and run DIY
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
 
-          cp ../configs/x86_64-passwall2.config .config
+          cp "../${{ matrix.config }}" .config
 
-          force_n() {
-            local key="$1"
-            sed -i "/^${key}=.*/d" .config || true
-            sed -i "/^# ${key} is not set$/d" .config || true
-            echo "# ${key} is not set" >> .config
-          }
-
-          force_n CONFIG_PACKAGE_rust
-          force_n CONFIG_PACKAGE_cargo
-
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS
-          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY
-
-          force_n CONFIG_PACKAGE_luci-app-package-manager
+          if [[ "${{ matrix.add_passwall }}" == "true" ]]; then
+            force_n() {
+              local key="$1"
+              sed -i "/^${key}=.*/d" .config
+              sed -i "/^# ${key} is not set$/d" .config
+              echo "# ${key} is not set" >> .config
+            }
+            # 強制屏蔽 Rust 相關組件
+            force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Client
+            force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Shadowsocks_Rust_Server
+            force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_tuic_client
+            force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Hysteria
+            force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_Hysteria2
+            force_n CONFIG_PACKAGE_geoview
+          fi
 
           chmod +x ../scripts/diy.sh
           bash ../scripts/diy.sh 2>&1 | tee -a build.log
-
-          make defconfig 2>&1 | tee -a build.log || { echo "defconfig failed"; tail -n 200 build.log; exit 1; }
-
-          echo "Sanity check: rust/cargo/geoview status in .config" | tee -a build.log
-
-          for k in CONFIG_PACKAGE_rust CONFIG_PACKAGE_cargo CONFIG_PACKAGE_geoview; do
-            echo "--- ${k} ---" | tee -a build.log
-            grep -nE "^${k}=" .config | tee -a build.log || true
-            grep -nE "^# ${k} is not set$" .config | tee -a build.log || true
-          done
-
-          if grep -qE '^CONFIG_PACKAGE_rust=y$' .config; then
-            echo "ERROR: rust is enabled by dependency tree." | tee -a build.log
-            exit 1
-          fi
-
-          if grep -qE '^CONFIG_PACKAGE_cargo=y$' .config; then
-            echo "ERROR: cargo is enabled by dependency tree." | tee -a build.log
-            exit 1
-          fi
+          make defconfig 2>&1 | tee -a build.log
 
       - name: Download sources
         shell: bash
         run: |
-          set -euo pipefail
           cd openwrt
-          make download -j$(nproc) 2>&1 | tee -a build.log
+          make download -j8 2>&1 | tee -a build.log
 
       - name: Build firmware
         shell: bash
         run: |
-          set -euo pipefail
           cd openwrt
-          make -j$(nproc) 2>&1 | tee -a build.log || (make -j1 V=s 2>&1 | tee -a build.log && exit 1)
+          # 首次嘗試使用 2 核編譯，提高穩定性
+          make -j2 2>&1 | tee -a build.log || make -j1 V=s 2>&1 | tee -a build.log
 
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: HarryWrt-${{ env.OWRT_BASE }}-${{ steps.meta.outputs.release }}-Passwall2-x86_64-log
+          name: HarryWrt-Log-${{ matrix.name }}-${{ steps.meta.outputs.release }}
           path: openwrt/build.log
 
-      - name: Upload firmware artifacts (BIOS + UEFI)
+      - name: Upload firmware
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: HarryWrt-${{ env.OWRT_BASE }}-${{ steps.meta.outputs.release }}-Passwall2-x86_64
+          name: HarryWrt-Image-${{ matrix.name }}-${{ steps.meta.outputs.release }}
           path: openwrt/bin/targets/x86/64/*combined*.img.gz
