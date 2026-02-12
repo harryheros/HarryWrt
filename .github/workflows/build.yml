@@ -259,8 +259,21 @@ jobs:
 
           ./scripts/feeds uninstall -a dnsmasq || true
 
-          ./scripts/feeds install -a -p passwall_packages -f 2>&1 | tee -a build.log || true
-          ./scripts/feeds install -a -p passwall2 -f 2>&1 | tee -a build.log || {
+# Install passwall2 package definitions
+./scripts/feeds install -a -p passwall2 -f 2>&1 | tee -a build.log || {
+  echo "passwall2 feeds install failed; printing dump.txt (if any)..." | tee -a build.log
+  find logs -type f -name dump.txt -maxdepth 6 -print -exec sed -n '1,240p' {} \; | tee -a build.log || true
+  exit 1
+}
+
+# Install ONLY the required passwall_packages definitions (do not install -a)
+# This keeps optional troublemakers like geoview out of Kconfig visibility.
+./scripts/feeds install -f -p passwall_packages \
+  xray-core sing-box v2ray-geodata \
+  microsocks ipt2socks tcping \
+  shadowsocks-libev shadowsocksr-libev simple-obfs \
+  v2ray-plugin xray-plugin trojan-plus \
+  2>&1 | tee -a build.log || true
             echo "feeds install failed; printing dump.txt (if any)..." | tee -a build.log
             find logs -type f -name dump.txt -maxdepth 6 -print -exec sed -n '1,240p' {} \; | tee -a build.log || true
             exit 1
