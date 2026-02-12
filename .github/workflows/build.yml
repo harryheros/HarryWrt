@@ -257,6 +257,9 @@ jobs:
 
           ./scripts/feeds update -a -f 2>&1 | tee -a build.log
 
+          # Prevent dnsmasq vs dnsmasq-full edge cases
+          ./scripts/feeds uninstall -a dnsmasq || true
+
           ./scripts/feeds install -f -p packages \
             luci luci-ssl luci-theme-argon \
             bash curl htop \
@@ -304,6 +307,9 @@ jobs:
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY
 
+          # Optional: disable LuCI web package manager by config (do not delete sources)
+          force_n CONFIG_PACKAGE_luci-app-package-manager
+
           chmod +x ../scripts/diy.sh
           bash ../scripts/diy.sh 2>&1 | tee -a build.log
 
@@ -314,7 +320,6 @@ jobs:
 
           if grep -qE '^CONFIG_PACKAGE_rust=y$' .config || grep -qE '^CONFIG_PACKAGE_cargo=y$' .config; then
             echo "Rust/Cargo was selected by dependency tree. Investigating..." | tee -a build.log
-
             echo "Searching Kconfig/Makefile rust/cargo selectors (precise)..." | tee -a build.log
 
             grep -RInE --include='Config.in' --include='Kconfig' --include='*.in' \
