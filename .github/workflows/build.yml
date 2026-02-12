@@ -319,8 +319,46 @@ jobs:
 
           make defconfig 2>&1 | tee -a build.log
 
-          grep -q '^CONFIG_PACKAGE_rust=n' .config
-          grep -q '^CONFIG_PACKAGE_cargo=n' .config
+      - name: Apply config and run DIY (enforce no rust)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd openwrt
+
+          cp ../configs/x86_64-passwall2.config .config
+
+          force_n() {
+            local key="$1"
+            # Remove any existing forms, then write the canonical "not set" form
+            sed -i "/^${key}=.*/d" .config
+            sed -i "/^# ${key} is not set$/d" .config
+            echo "# ${key} is not set" >> .config
+          }
+
+          force_y() {
+            local key="$1"
+            sed -i "/^${key}=.*/d" .config
+            sed -i "/^# ${key} is not set$/d" .config
+            echo "${key}=y" >> .config
+          }
+
+          # Hard-disable Rust/Cargo and selected Passwall2 options
+          force_n CONFIG_PACKAGE_rust
+          force_n CONFIG_PACKAGE_cargo
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_CLIENT
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_TUIC_SERVER
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_HYSTERIA2
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS
+          force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY
+
+          chmod +x ../scripts/diy.sh
+          bash ../scripts/diy.sh 2>&1 | tee -a build.log
+
+          make defconfig 2>&1 | tee -a build.log
+
+          # Verify disabled (accept both styles: "=n" or "# ... is not set")
+          grep -qE '^(CONFIG_PACKAGE_rust=n|# CONFIG_PACKAGE_rust is not set)$' .config
+          grep -qE '^(CONFIG_PACKAGE_cargo=n|# CONFIG_PACKAGE_cargo is not set)$' .config
 
       - name: Download sources
         shell: bash
