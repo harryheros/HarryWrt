@@ -314,7 +314,6 @@ jobs:
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_SHADOW_TLS
           force_n CONFIG_PACKAGE_luci-app-passwall2_INCLUDE_NAIVEPROXY
 
-          force_n CONFIG_PACKAGE_geoview
           force_n CONFIG_PACKAGE_luci-app-package-manager
 
           chmod +x ../scripts/diy.sh
@@ -337,11 +336,6 @@ jobs:
 
           if grep -qE '^CONFIG_PACKAGE_cargo=y$' .config; then
             echo "ERROR: cargo is enabled by dependency tree." | tee -a build.log
-            exit 1
-          fi
-
-          if grep -qE '^CONFIG_PACKAGE_geoview=y$' .config; then
-            echo "ERROR: geoview is enabled by dependency tree." | tee -a build.log
             exit 1
           fi
 
