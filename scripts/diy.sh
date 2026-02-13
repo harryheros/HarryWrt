@@ -2,10 +2,9 @@
 set -euo pipefail
 
 FILES_DIR="files"
-UCI_DEFAULTS_DIR="${FILES_DIR}/etc/uci-defaults"
 CFG_DIR="${FILES_DIR}/etc/config"
 
-mkdir -p "${CFG_DIR}" "${UCI_DEFAULTS_DIR}"
+mkdir -p "${CFG_DIR}"
 
 cat > "${CFG_DIR}/system" <<'EOF'
 config system
@@ -30,16 +29,5 @@ cat > "${FILES_DIR}/etc/banner" <<'EOF'
  HarryWrt 24.10.5 | Clean Edition | Stable Base
 ---------------------------------------------------------------
 EOF
-
-cat > "${UCI_DEFAULTS_DIR}/99-harrywrt-settings" <<'EOF'
-#!/bin/sh
-
-uci -q set luci.main.mediaurlbase='/luci-static/argon'
-uci -q commit luci
-
-exit 0
-EOF
-
-chmod 0755 "${UCI_DEFAULTS_DIR}/99-harrywrt-settings"
 
 echo "DIY script executed successfully."
