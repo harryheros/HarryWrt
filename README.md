@@ -1,6 +1,7 @@
 # HarryWrt
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![Platform](https://img.shields.io/badge/Platform-BIOS%20%7C%20UEFI-orange.svg)](#)
+
 **HarryWrt** is a clean and stable OpenWrt firmware build, focused on reliability, performance, and long-term usability.
 
 This project is built on official **OpenWrt 24.10.5** sources and is designed for users who want a minimal but powerful base system with extra utilities and expanded storage space for future customization.
