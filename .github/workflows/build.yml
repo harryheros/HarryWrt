@@ -87,6 +87,18 @@ jobs:
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
+      - name: Add extra packages (Argon theme sources)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd openwrt
+
+          # Add Argon theme source into buildroot (not enabled by default unless selected in .config)
+          # Upstream: https://github.com/jerrykuku/luci-theme-argon
+          mkdir -p package/extra
+          rm -rf package/extra/luci-theme-argon || true
+          git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git package/extra/luci-theme-argon 2>&1 | tee -a build.log
+
       - name: Update and install feeds
         shell: bash
         run: |
@@ -107,6 +119,12 @@ jobs:
           bash "${GITHUB_WORKSPACE}/scripts/diy.sh" 2>&1 | tee -a build.log
 
           make defconfig 2>&1 | tee -a build.log
+
+          # Hard check: ensure Argon is actually selected in final .config
+          grep -qE '^CONFIG_PACKAGE_luci-theme-argon=y$' .config || {
+            echo "ERROR: luci-theme-argon is not enabled in final .config" | tee -a build.log
+            exit 1
+          }
 
       - name: Download sources
         shell: bash
@@ -171,13 +189,12 @@ jobs:
             Base: OpenWrt 24.10.5 (x86_64)
             Profile: Clean Edition
 
+            Notes:
+            - Argon theme is included but not set as the default LuCI theme.
+
             Recommended:
             - squashfs-uefi for UEFI systems
             - squashfs-bios for legacy BIOS systems
-
-            Images:
-            - squashfs (bios, uefi)
-            - ext4 (bios, uefi)
 
             Default:
             - Hostname: HarryWrt
