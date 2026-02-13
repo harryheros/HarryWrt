@@ -2,11 +2,14 @@
 set -euo pipefail
 
 FILES_DIR="files"
-CFG_DIR="${FILES_DIR}/etc/config"
 
-mkdir -p "${CFG_DIR}"
+mkdir -p "${FILES_DIR}/etc/config"
+mkdir -p "${FILES_DIR}/etc/uci-defaults"
 
-cat > "${CFG_DIR}/system" <<'EOF'
+# ------------------------------------------------------------
+# 1) System defaults (hostname, timezone)
+# ------------------------------------------------------------
+cat > "${FILES_DIR}/etc/config/system" <<'EOF'
 config system
   option hostname 'HarryWrt'
   option timezone 'HKT-8'
@@ -17,6 +20,9 @@ config system
   option cronloglevel '5'
 EOF
 
+# ------------------------------------------------------------
+# 2) SSH login banner
+# ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/banner" <<'EOF'
 ---------------------------------------------------------------
  _   _                           _  _   _  ____  _____
@@ -27,7 +33,41 @@ cat > "${FILES_DIR}/etc/banner" <<'EOF'
                        |___/
 ---------------------------------------------------------------
  HarryWrt 24.10.5 | Clean Edition | Stable Base
+ Based on OpenWrt | No Bloatware | Performance Focused
 ---------------------------------------------------------------
 EOF
+
+# ------------------------------------------------------------
+# 3) MOTD (post-login message)
+# ------------------------------------------------------------
+cat > "${FILES_DIR}/etc/motd" <<'EOF'
+HarryWrt 24.10.5 - Clean Edition (based on OpenWrt)
+EOF
+
+# ------------------------------------------------------------
+# 4) Branding: show "HarryWrt" in LuCI footer and system info
+#    (safe approach: update DISTRIB_DESCRIPTION only)
+# ------------------------------------------------------------
+cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'EOF'
+#!/bin/sh
+
+DESC="HarryWrt 24.10.5 Clean (based on OpenWrt)"
+
+if [ -f /etc/openwrt_release ]; then
+  sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='${DESC}'/" /etc/openwrt_release 2>/dev/null || true
+fi
+
+if [ -f /etc/os-release ]; then
+  sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /etc/os-release 2>/dev/null || true
+fi
+
+if [ -f /usr/lib/os-release ]; then
+  sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /usr/lib/os-release 2>/dev/null || true
+fi
+
+exit 0
+EOF
+
+chmod +x "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 echo "DIY script executed successfully."
