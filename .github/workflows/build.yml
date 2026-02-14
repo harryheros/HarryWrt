@@ -87,13 +87,20 @@ jobs:
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
+      - name: Add Passwall packages feed (for offline-ready base)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd openwrt
+          echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
+          tail -n 20 feeds.conf.default | tee -a build.log
+
       - name: Add extra packages (Argon theme sources)
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
 
-          # Add Argon theme source into buildroot (enabled only if selected in .config)
           mkdir -p package/extra
           rm -rf package/extra/luci-theme-argon || true
           git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git package/extra/luci-theme-argon 2>&1 | tee -a build.log
@@ -128,22 +135,26 @@ jobs:
             "CONFIG_PACKAGE_kmod-nft-socket"
             "CONFIG_PACKAGE_kmod-nft-compat"
             "CONFIG_PACKAGE_kmod-tun"
-            "CONFIG_PACKAGE_libev"
-            "CONFIG_PACKAGE_libsodium"
-            "CONFIG_PACKAGE_libudns"
             "CONFIG_PACKAGE_kmod-inet-diag"
             "CONFIG_PACKAGE_kmod-netlink-diag"
             "CONFIG_PACKAGE_coreutils"
             "CONFIG_PACKAGE_coreutils-base64"
             "CONFIG_PACKAGE_coreutils-nohup"
             "CONFIG_PACKAGE_libuci-lua"
+            "CONFIG_PACKAGE_libev"
+            "CONFIG_PACKAGE_libsodium"
+            "CONFIG_PACKAGE_libudns"
+            "CONFIG_PACKAGE_tcping"
+            "CONFIG_PACKAGE_geoview"
+            "CONFIG_PACKAGE_v2ray-geoip"
+            "CONFIG_PACKAGE_v2ray-geosite"
             "CONFIG_PACKAGE_xray-core"
             "CONFIG_PACKAGE_sing-box"
           )
 
           OPTIONAL_Y=(
-            "CONFIG_PACKAGE_nftables"
             "CONFIG_PACKAGE_luci-theme-argon"
+            "CONFIG_PACKAGE_nftables"
           )
 
           missing=0
@@ -233,8 +244,11 @@ jobs:
             Profile: Clean Edition
 
             Notes:
-            - Argon theme source is included. It is enabled only if selected in the build config.
-            - This build is proxy-ready and includes offline-friendly runtime dependencies for installing Passwall2 UI from a local IPK.
+            - Default LuCI theme is Bootstrap (stock-like).
+            - Argon theme is included as an optional theme (not default).
+            - Offline-ready base for installing Passwall2 UI from a local IPK:
+              tcping, geoview, v2ray-geoip, v2ray-geosite, xray-core, sing-box,
+              and common runtime libs are preinstalled.
 
             Recommended:
             - squashfs-uefi for UEFI systems
