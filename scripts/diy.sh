@@ -45,9 +45,7 @@ HarryWrt 24.10.5 - Clean Edition (based on OpenWrt)
 EOF
 
 # ------------------------------------------------------------
-# 4) UCI defaults: branding + LuCI default theme
-#    - Keep Argon installed as an option
-#    - Force default theme to bootstrap for a stock-like experience
+# 4) UCI defaults: branding
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'EOF'
 #!/bin/sh
@@ -55,7 +53,6 @@ set -eu
 
 DESC="HarryWrt 24.10.5 Clean (based on OpenWrt)"
 
-# Update release descriptions (best-effort)
 if [ -f /etc/openwrt_release ]; then
   sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='${DESC}'/" /etc/openwrt_release 2>/dev/null || true
 fi
@@ -68,7 +65,20 @@ if [ -f /usr/lib/os-release ]; then
   sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /usr/lib/os-release 2>/dev/null || true
 fi
 
-# Force LuCI default theme to bootstrap (Argon remains available to switch)
+exit 0
+EOF
+
+chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
+
+# ------------------------------------------------------------
+# 5) Force default LuCI theme to Bootstrap (last-wins)
+# ------------------------------------------------------------
+cat > "${FILES_DIR}/etc/uci-defaults/99-force-default-theme" <<'EOF'
+#!/bin/sh
+set -eu
+
+[ -f /etc/config/luci ] || touch /etc/config/luci
+
 if command -v uci >/dev/null 2>&1; then
   uci -q set luci.main.mediaurlbase='/luci-static/bootstrap' || true
   uci -q commit luci || true
@@ -77,6 +87,6 @@ fi
 exit 0
 EOF
 
-chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
+chmod 0755 "${FILES_DIR}/etc/uci-defaults/99-force-default-theme"
 
 echo "DIY script executed successfully."
