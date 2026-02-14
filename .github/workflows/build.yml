@@ -120,10 +120,9 @@ jobs:
           make defconfig 2>&1 | tee -a build.log
 
           echo "Checking important packages in final .config..." | tee -a build.log
-          # These must be enabled for the offline-friendly proxy-ready base
+
           MUST_Y=(
             "CONFIG_PACKAGE_dnsmasq-full"
-            "CONFIG_PACKAGE_nftables"
             "CONFIG_PACKAGE_iptables-nft"
             "CONFIG_PACKAGE_kmod-nft-tproxy"
             "CONFIG_PACKAGE_kmod-nft-socket"
@@ -142,6 +141,11 @@ jobs:
             "CONFIG_PACKAGE_sing-box"
           )
 
+          OPTIONAL_Y=(
+            "CONFIG_PACKAGE_nftables"
+            "CONFIG_PACKAGE_luci-theme-argon"
+          )
+
           missing=0
           for k in "${MUST_Y[@]}"; do
             if grep -qE "^${k}=y$" .config; then
@@ -152,12 +156,13 @@ jobs:
             fi
           done
 
-          # Argon is optional; do not fail if not selected
-          if grep -qE '^CONFIG_PACKAGE_luci-theme-argon=y$' .config; then
-            echo "OK: CONFIG_PACKAGE_luci-theme-argon=y (included)" | tee -a build.log
-          else
-            echo "NOTE: CONFIG_PACKAGE_luci-theme-argon is not enabled (optional)" | tee -a build.log
-          fi
+          for k in "${OPTIONAL_Y[@]}"; do
+            if grep -qE "^${k}=y$" .config; then
+              echo "OK: ${k}=y (optional)" | tee -a build.log
+            else
+              echo "NOTE: ${k} is not enabled (optional)" | tee -a build.log
+            fi
+          done
 
           if [[ "$missing" -ne 0 ]]; then
             echo "ERROR: One or more required packages are not enabled in final .config." | tee -a build.log
@@ -229,7 +234,7 @@ jobs:
 
             Notes:
             - Argon theme source is included. It is enabled only if selected in the build config.
-            - This build is "proxy-ready" and includes offline-friendly runtime dependencies for installing Passwall2 UI from a local IPK.
+            - This build is proxy-ready and includes offline-friendly runtime dependencies for installing Passwall2 UI from a local IPK.
 
             Recommended:
             - squashfs-uefi for UEFI systems
