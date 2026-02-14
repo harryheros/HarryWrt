@@ -3,9 +3,9 @@ set -euo pipefail
 
 # ============================================================
 # HarryWrt DIY Script (OpenWrt 24.10.5 / Clean)
+# - Build-time patch: allow Go toolchain auto-download (Go >= 1.24) for geoview
 # - Branding (banner/motd/DISTRIB_DESCRIPTION)
-# - Default LuCI theme forced to Bootstrap (Argon remains optional)
-# - Fix geoview build: allow Go toolchain auto-download (Go >= 1.24)
+# - Force LuCI default theme to Bootstrap (Argon remains optional)
 # ============================================================
 
 FILES_DIR="files"
@@ -15,29 +15,33 @@ mkdir -p "${FILES_DIR}/etc/uci-defaults"
 
 # ------------------------------------------------------------
 # 0) Build-time fix: geoview requires Go >= 1.24
-#    OpenWrt 24.10.x ships Go 1.23.x and locks GOTOOLCHAIN=local
-#    Patch to GOTOOLCHAIN=auto so Go can fetch the needed toolchain.
-#    MUST run before make defconfig / compilation.
+#    OpenWrt 24.10.x ships Go 1.23.x and locks GOTOOLCHAIN=local in golang-package.mk
+#    Patch to GOTOOLCHAIN=auto so Go can fetch the needed toolchain during build.
+#
+#    IMPORTANT:
+#    - This must run AFTER feeds update/install (so feeds/packages exists),
+#      and BEFORE make defconfig / make.
 # ------------------------------------------------------------
 echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto) for geoview..."
 
-# 0.1 patch golang-build.sh
-if [ -f "feeds/packages/lang/golang/golang-build.sh" ]; then
-  sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' "feeds/packages/lang/golang/golang-build.sh"
+GOLANG_DIR="feeds/packages/lang/golang"
+if [ -d "$GOLANG_DIR" ]; then
+  # Patch Makefile/shell-style assignments:
+  #   GOTOOLCHAIN=local
+  #   GOTOOLCHAIN := local
+  #   export GOTOOLCHAIN=local
+  find "$GOLANG_DIR" -type f \( -name "*.mk" -o -name "*.sh" -o -name "Makefile" \) -print0 \
+    | xargs -0 sed -i -E \
+      's/^([[:space:]]*(export[[:space:]]+)?)GOTOOLCHAIN([[:space:]]*:?=)[[:space:]]*local/\1GOTOOLCHAIN\3 auto/g'
+
+  # Sanity check: fail fast if still locked
+  if grep -RInE '^[[:space:]]*(export[[:space:]]+)?GOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local' "$GOLANG_DIR" >/dev/null 2>&1; then
+    echo "ERROR: still found GOTOOLCHAIN=local after patch (geoview will fail)" >&2
+    grep -RInE '^[[:space:]]*(export[[:space:]]+)?GOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local' "$GOLANG_DIR" | head -n 30 >&2 || true
+    exit 1
+  fi
 else
-  # fallback for different feeds layout
-  find "feeds/packages/lang/golang" -name "golang-build.sh" -exec sed -i 's/GOTOOLCHAIN=local/GOTOOLCHAIN=auto/g' {} + || true
-fi
-
-# 0.2 patch golang-package.mk (double insurance)
-if [ -f "feeds/packages/lang/golang/golang-package.mk" ]; then
-  sed -i 's/^GOTOOLCHAIN:=local$/GOTOOLCHAIN:=auto/g' "feeds/packages/lang/golang/golang-package.mk" || true
-fi
-
-# 0.3 sanity check: fail fast if still locked
-if grep -RIn "GOTOOLCHAIN=local" "feeds/packages/lang/golang" >/dev/null 2>&1; then
-  echo "ERROR: still found GOTOOLCHAIN=local after patch (geoview will fail)" >&2
-  grep -RIn "GOTOOLCHAIN=local" "feeds/packages/lang/golang" | head -n 30 >&2 || true
+  echo "ERROR: $GOLANG_DIR not found. Did you run feeds update/install before this DIY script?" >&2
   exit 1
 fi
 
@@ -83,7 +87,6 @@ EOF
 
 # ------------------------------------------------------------
 # 4) UCI defaults: Branding + release description
-#    (best-effort; won't break if file format differs)
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'EOF'
 #!/bin/sh
@@ -110,8 +113,7 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 # ------------------------------------------------------------
 # 5) Force LuCI default theme to Bootstrap (stock-like)
-#    Use 99 to ensure it runs last.
-#    Argon can still be selected manually later.
+#    Use 99 to ensure it runs last, even if other uci-defaults exist.
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/99-force-default-theme" <<'EOF'
 #!/bin/sh
