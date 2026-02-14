@@ -3,9 +3,9 @@ set -euo pipefail
 
 # ============================================================
 # HarryWrt DIY Script (OpenWrt 24.10.5 / Clean)
-# - Build-time patch: allow Go toolchain auto-download (Go >= 1.24) for geoview
 # - Branding (banner/motd/DISTRIB_DESCRIPTION)
-# - Force LuCI default theme to Bootstrap (Argon remains optional)
+# - Default LuCI theme forced to Bootstrap (Argon remains optional)
+# - Fix Go toolchain policy for geoview (Go >= 1.24): GOTOOLCHAIN=auto
 # ============================================================
 
 FILES_DIR="files"
@@ -14,34 +14,41 @@ mkdir -p "${FILES_DIR}/etc/config"
 mkdir -p "${FILES_DIR}/etc/uci-defaults"
 
 # ------------------------------------------------------------
-# 0) Build-time fix: geoview requires Go >= 1.24
-#    OpenWrt 24.10.x ships Go 1.23.x and locks GOTOOLCHAIN=local in golang-package.mk
-#    Patch to GOTOOLCHAIN=auto so Go can fetch the needed toolchain during build.
-#
-#    IMPORTANT:
-#    - This must run AFTER feeds update/install (so feeds/packages exists),
-#      and BEFORE make defconfig / make.
+# 0) Build-time fix: Go toolchain policy for geoview
+#    OpenWrt 24.10.x uses Go 1.23.x, and feeds may force GOTOOLCHAIN=local.
+#    We patch the real injector: golang-package.mk, plus golang-build.sh.
+#    IMPORTANT: must become exactly "GOTOOLCHAIN=auto" (NO SPACE).
 # ------------------------------------------------------------
-echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto) for geoview..."
+echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto) ..."
 
-GOLANG_DIR="feeds/packages/lang/golang"
-if [ -d "$GOLANG_DIR" ]; then
-  # Patch Makefile/shell-style assignments:
-  #   GOTOOLCHAIN=local
-  #   GOTOOLCHAIN := local
-  #   export GOTOOLCHAIN=local
-  find "$GOLANG_DIR" -type f \( -name "*.mk" -o -name "*.sh" -o -name "Makefile" \) -print0 \
-    | xargs -0 sed -i -E \
-      's/^([[:space:]]*(export[[:space:]]+)?)GOTOOLCHAIN([[:space:]]*:?=)[[:space:]]*local/\1GOTOOLCHAIN\3 auto/g'
+# Patch 0.1: golang-package.mk (this one injects env vars into build commands)
+GOLANG_PKG_MK="feeds/packages/lang/golang/golang-package.mk"
+if [ -f "$GOLANG_PKG_MK" ]; then
+  # Replace exactly local -> auto, keep "=" form, no spaces
+  sed -i -E 's/\bGOTOOLCHAIN=local\b/GOTOOLCHAIN=auto/g' "$GOLANG_PKG_MK"
+fi
 
-  # Sanity check: fail fast if still locked
-  if grep -RInE '^[[:space:]]*(export[[:space:]]+)?GOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local' "$GOLANG_DIR" >/dev/null 2>&1; then
-    echo "ERROR: still found GOTOOLCHAIN=local after patch (geoview will fail)" >&2
-    grep -RInE '^[[:space:]]*(export[[:space:]]+)?GOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local' "$GOLANG_DIR" | head -n 30 >&2 || true
-    exit 1
-  fi
-else
-  echo "ERROR: $GOLANG_DIR not found. Did you run feeds update/install before this DIY script?" >&2
+# Patch 0.2: golang-build.sh (belt & suspenders)
+GOLANG_BUILD_SH="feeds/packages/lang/golang/golang-build.sh"
+if [ -f "$GOLANG_BUILD_SH" ]; then
+  # If script hardcodes local, flip to auto
+  sed -i -E 's/\bGOTOOLCHAIN[:=]*local\b/GOTOOLCHAIN=auto/g' "$GOLANG_BUILD_SH"
+fi
+
+# Patch 0.3: clean up any accidental "GOTOOLCHAIN= auto" (space after '=')
+# This is exactly what broke your sing-box build.
+find feeds/packages/lang/golang -type f -print0 2>/dev/null | xargs -0 -r sed -i -E 's/\bGOTOOLCHAIN=[[:space:]]+auto\b/GOTOOLCHAIN=auto/g'
+
+# Patch 0.4 sanity check (fail fast)
+if grep -RInE '\bGOTOOLCHAIN=[[:space:]]+auto\b' feeds/packages/lang/golang >/dev/null 2>&1; then
+  echo "ERROR: found 'GOTOOLCHAIN= auto' (with space). This will break builds." >&2
+  grep -RInE '\bGOTOOLCHAIN=[[:space:]]+auto\b' feeds/packages/lang/golang | head -n 50 >&2 || true
+  exit 1
+fi
+
+if grep -RInE '\bGOTOOLCHAIN=local\b' feeds/packages/lang/golang >/dev/null 2>&1; then
+  echo "ERROR: still found 'GOTOOLCHAIN=local' after patch." >&2
+  grep -RInE '\bGOTOOLCHAIN=local\b' feeds/packages/lang/golang | head -n 50 >&2 || true
   exit 1
 fi
 
@@ -86,7 +93,7 @@ HarryWrt 24.10.5 - Clean Edition (based on OpenWrt)
 EOF
 
 # ------------------------------------------------------------
-# 4) UCI defaults: Branding + release description
+# 4) UCI defaults: branding + release description
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'EOF'
 #!/bin/sh
@@ -94,7 +101,6 @@ set -eu
 
 DESC="HarryWrt 24.10.5 Clean (based on OpenWrt)"
 
-# Update release descriptions (best-effort)
 if [ -f /etc/openwrt_release ]; then
   sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='${DESC}'/" /etc/openwrt_release 2>/dev/null || true
 fi
@@ -113,7 +119,7 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 # ------------------------------------------------------------
 # 5) Force LuCI default theme to Bootstrap (stock-like)
-#    Use 99 to ensure it runs last, even if other uci-defaults exist.
+#    Use 99 to ensure it runs last.
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/99-force-default-theme" <<'EOF'
 #!/bin/sh
