@@ -3,44 +3,63 @@ set -euo pipefail
 
 # ============================================================
 # HarryWrt DIY Script (OpenWrt 24.10.5 / Clean)
-# - Fix geoview build: allow Go toolchain auto-download (Go >= 1.24)
 # - Branding (banner/motd/DISTRIB_DESCRIPTION)
-# - Force LuCI default theme to Bootstrap (Argon optional)
+# - Force LuCI default theme to Bootstrap (Argon remains optional)
+# - Fix Go toolchain lock for geoview (Go >= 1.24): GOTOOLCHAIN=auto
 # ============================================================
 
 FILES_DIR="files"
-mkdir -p "${FILES_DIR}/etc/config" "${FILES_DIR}/etc/uci-defaults"
+
+mkdir -p "${FILES_DIR}/etc/config"
+mkdir -p "${FILES_DIR}/etc/uci-defaults"
 
 # ------------------------------------------------------------
-# 0) Build-time fix: geoview requires Go >= 1.24
-#    OpenWrt 24.10.x ships Go 1.23.x and locks GOTOOLCHAIN=local
-#    Patch to auto so Go can fetch the needed toolchain.
+# 0) Build-time fix: allow Go toolchain auto-download
+#    IMPORTANT:
+#    - Patch ONLY specific files to avoid "mass sed" corrupting .mk files
+#    - Ensure NO leading spaces: must be GOTOOLCHAIN=auto (not " auto")
 # ------------------------------------------------------------
-echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto)..."
+echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto) ..."
 
-# Patch golang-package.mk (THIS is usually the real source of GOTOOLCHAIN=local)
-GOLANG_PKG_MK="feeds/packages/lang/golang/golang-package.mk"
-if [ -f "$GOLANG_PKG_MK" ]; then
-  # Replace exactly 'GOTOOLCHAIN=local' or 'GOTOOLCHAIN:=local' (with optional spaces)
-  sed -i -E 's/(GOTOOLCHAIN\s*[:]?=)\s*local/\1auto/g' "$GOLANG_PKG_MK"
+GOLANG_DIR="feeds/packages/lang/golang"
+
+patch_gotoolchain_file() {
+  local f="$1"
+  [ -f "$f" ] || return 0
+
+  # Replace:
+  #   <spaces>GOTOOLCHAIN=local
+  #   <spaces>GOTOOLCHAIN:=local
+  #   <spaces>GOTOOLCHAIN ?= local
+  # into:
+  #   same assignment operator, value becomes "auto" with NO leading spaces
+  sed -i -E "s/^([[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=)[[:space:]]*local/\1auto/g" "$f"
+
+  # Some files may use export form
+  sed -i -E "s/^([[:space:]]*export[[:space:]]+GOTOOLCHAIN=)[[:space:]]*local/\1auto/g" "$f"
+}
+
+# Patch the two known lock points
+patch_gotoolchain_file "${GOLANG_DIR}/golang-build.sh"
+patch_gotoolchain_file "${GOLANG_DIR}/golang-package.mk"
+
+# Also patch any other .mk that might define it (safe: only .mk files, only exact var)
+if [ -d "$GOLANG_DIR" ]; then
+  while IFS= read -r -d '' f; do
+    patch_gotoolchain_file "$f"
+  done < <(find "$GOLANG_DIR" -maxdepth 2 -type f \( -name "*.mk" -o -name "*.sh" \) -print0)
 fi
 
-# Patch golang-build.sh too (extra safety)
-GOLANG_BUILD_SH="feeds/packages/lang/golang/golang-build.sh"
-if [ -f "$GOLANG_BUILD_SH" ]; then
-  sed -i -E 's/(GOTOOLCHAIN\s*[:]?=)\s*local/\1auto/g' "$GOLANG_BUILD_SH"
+# Sanity check: fail fast if still locked OR if someone produced "GOTOOLCHAIN= auto"
+if grep -RInE "^[[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=[[:space:]]*local" "$GOLANG_DIR" >/dev/null 2>&1; then
+  echo "ERROR: still found GOTOOLCHAIN=local after patch" >&2
+  grep -RInE "^[[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=[[:space:]]*local" "$GOLANG_DIR" | head -n 50 >&2 || true
+  exit 1
 fi
 
-# Last-resort: patch any other files under golang dir that may hardcode it
-if [ -d "feeds/packages/lang/golang" ]; then
-  find "feeds/packages/lang/golang" -type f -maxdepth 3 -print0 \
-    | xargs -0 -I{} sed -i -E 's/(GOTOOLCHAIN\s*[:]?=)\s*local/\1auto/g' "{}" || true
-fi
-
-# Sanity check (fail fast if still locked anywhere)
-if grep -RInE 'GOTOOLCHAIN\s*[:]?=\s*local\b' feeds/packages/lang/golang >/dev/null 2>&1; then
-  echo "ERROR: still found GOTOOLCHAIN=local after patch (geoview will fail)" >&2
-  grep -RInE 'GOTOOLCHAIN\s*[:]?=\s*local\b' feeds/packages/lang/golang | head -n 50 >&2 || true
+if grep -RInE "^[[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=[[:space:]]+auto" "$GOLANG_DIR" >/dev/null 2>&1; then
+  echo "ERROR: found leading-space value 'GOTOOLCHAIN= auto' (will break builds)" >&2
+  grep -RInE "^[[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=[[:space:]]+auto" "$GOLANG_DIR" | head -n 50 >&2 || true
   exit 1
 fi
 
@@ -78,14 +97,14 @@ cat > "${FILES_DIR}/etc/banner" <<'EOF'
 EOF
 
 # ------------------------------------------------------------
-# 3) MOTD
+# 3) MOTD (post-login message)
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/motd" <<'EOF'
 HarryWrt 24.10.5 - Clean Edition (based on OpenWrt)
 EOF
 
 # ------------------------------------------------------------
-# 4) Branding
+# 4) UCI defaults: Branding (DISTRIB_DESCRIPTION / PRETTY_NAME)
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'EOF'
 #!/bin/sh
@@ -93,24 +112,34 @@ set -eu
 
 DESC="HarryWrt 24.10.5 Clean (based on OpenWrt)"
 
-[ -f /etc/openwrt_release ] && sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='${DESC}'/" /etc/openwrt_release 2>/dev/null || true
-[ -f /etc/os-release ] && sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /etc/os-release 2>/dev/null || true
-[ -f /usr/lib/os-release ] && sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /usr/lib/os-release 2>/dev/null || true
+if [ -f /etc/openwrt_release ]; then
+  sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='${DESC}'/" /etc/openwrt_release 2>/dev/null || true
+fi
+
+if [ -f /etc/os-release ]; then
+  sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /etc/os-release 2>/dev/null || true
+fi
+
+if [ -f /usr/lib/os-release ]; then
+  sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /usr/lib/os-release 2>/dev/null || true
+fi
 
 exit 0
 EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 # ------------------------------------------------------------
-# 5) Force LuCI default theme to Bootstrap (stock-like)
+# 5) Force LuCI default theme to official Bootstrap (stock-like)
+#    Argon remains installed but NOT default
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/99-force-default-theme" <<'EOF'
 #!/bin/sh
 set -eu
 
-command -v uci >/dev/null 2>&1 || exit 0
-uci -q set luci.main.mediaurlbase='/luci-static/bootstrap' || true
-uci -q commit luci || true
+if command -v uci >/dev/null 2>&1; then
+  uci -q set luci.main.mediaurlbase='/luci-static/bootstrap' || true
+  uci -q commit luci || true
+fi
 
 exit 0
 EOF
