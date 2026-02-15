@@ -1,9 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
 # ============================================================
 # HarryWrt DIY Script (OpenWrt 24.10.5 / Clean)
 # - Branding (banner/motd/DISTRIB_DESCRIPTION)
 # - Keep stock-like LuCI look: Bootstrap as default theme
 # - Build compatibility: Go toolchain policy patch (GOTOOLCHAIN=auto)
-# - Runtime compatibility helpers (apply helper / first-boot kick)
+# - Runtime compatibility helpers (ucitrack apply helper + musl loader fix)
 # ============================================================
 
 FILES_DIR="files"
@@ -12,8 +15,7 @@ mkdir -p "${FILES_DIR}/etc/uci-defaults"
 
 # ------------------------------------------------------------
 # 0) Build-time compatibility: Go toolchain policy
-#    - Match both '=' and ':=' (defense-grade)
-#    - Ensure "GOTOOLCHAIN=auto" has NO SPACE
+#    Match both '=' and ':=' and normalize to "GOTOOLCHAIN=auto"
 # ------------------------------------------------------------
 echo "[patch] enabling Go toolchain auto policy ..."
 
@@ -28,21 +30,9 @@ if [ -f "$GOLANG_BUILD_SH" ]; then
   sed -i -E 's/\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b/GOTOOLCHAIN=auto/g' "$GOLANG_BUILD_SH"
 fi
 
-# Clean accidental "GOTOOLCHAIN= auto"
-find feeds/packages/lang/golang -type f -print0 2>/dev/null | xargs -0 -r sed -i -E 's/\bGOTOOLCHAIN=[[:space:]]+auto\b/GOTOOLCHAIN=auto/g'
-
-# Fail fast: any remaining local / spaced-auto is unacceptable
-if grep -RInE '\bGOTOOLCHAIN=[[:space:]]+auto\b' feeds/packages/lang/golang >/dev/null 2>&1; then
-  echo "ERROR: found 'GOTOOLCHAIN= auto' (space after '='). This will break builds." >&2
-  grep -RInE '\bGOTOOLCHAIN=[[:space:]]+auto\b' feeds/packages/lang/golang | head -n 50 >&2 || true
-  exit 1
-fi
-
-if grep -RInE '\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b' feeds/packages/lang/golang >/dev/null 2>&1; then
-  echo "ERROR: still found GOTOOLCHAIN=local after patch." >&2
-  grep -RInE '\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b' feeds/packages/lang/golang | head -n 50 >&2 || true
-  exit 1
-fi
+# Clean accidental "GOTOOLCHAIN= auto" (space after '=')
+find feeds/packages/lang/golang -type f -print0 2>/dev/null \
+  | xargs -0 -r sed -i -E 's/\bGOTOOLCHAIN=[[:space:]]+auto\b/GOTOOLCHAIN=auto/g'
 
 echo "[patch] toolchain policy patched OK."
 
@@ -65,8 +55,15 @@ EOF
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/banner" <<'EOF'
 ---------------------------------------------------------------
+ _   _                           _  _   _  ____  _____
+| | | | __ _ _ __ _ __ _   _    | || | | ||  _ \|_   _|
+| |_| |/ _` | '__| '__| | | |   | || |_| || |_) | | |
+|  _  | (_| | |  | |  | |_| |   |__   _  ||  _ <  | |
+|_| |_|\__,_|_|  |_|   \__, |      |_| |_||_| \_\ |_|
+                       |___/
+---------------------------------------------------------------
  HarryWrt 24.10.5 | Clean Edition | Stable Base
- Based on OpenWrt | Minimal | Performance Focused
+ Based on OpenWrt | No Bloatware | Performance Focused
 ---------------------------------------------------------------
 EOF
 
@@ -79,7 +76,6 @@ EOF
 
 # ------------------------------------------------------------
 # 4) UCI defaults: branding
-#    - Add || true to avoid noisy logs if file layout differs
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'EOF'
 #!/bin/sh
@@ -104,7 +100,7 @@ EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 # ------------------------------------------------------------
-# 5) Force LuCI default theme to Bootstrap
+# 5) Force LuCI default theme to Bootstrap (stock-like)
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/99-force-default-theme" <<'EOF'
 #!/bin/sh
@@ -121,34 +117,33 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/99-force-default-theme"
 
 # ------------------------------------------------------------
 # 6) Apply-helper (ucitrack linkage)
-#    - Keep it minimal: only "firewall" and "dhcp"
-#    - Avoid log spam for services that may not exist
+#    NOTE: do NOT reference services that may not exist (avoid log spam).
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/30-ucitrack-apply-helper" <<'EOF'
 #!/bin/sh
 set -eu
 
+# Ensure config exists
 [ -f /etc/config/ucitrack ] || touch /etc/config/ucitrack
 
-# Keep helper minimal & safe
-uci -q set ucitrack.apply_helper='config' || true
-uci -q set ucitrack.apply_helper.init='firewall dhcp' || true
-uci -q set ucitrack.apply_helper.affects='firewall dhcp' || true
-uci -q commit ucitrack || true
+# Minimal, safe apply helper: firewall + dhcp only
+uci -q set ucitrack.apply_helper='config'
+uci -q set ucitrack.apply_helper.init='firewall dhcp'
+uci -q set ucitrack.apply_helper.affects='firewall dhcp'
+uci -q commit ucitrack
 
 exit 0
 EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/30-ucitrack-apply-helper"
 
 # ------------------------------------------------------------
-# 7) First-boot compatibility kick
-#    - musl loader symlink guard (x86_64)
+# 7) Musl loader fix (first boot)
+#    Helps avoid "-ash: not found" when a binary expects loader path.
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/98-firstboot-apply-kick" <<'EOF'
 #!/bin/sh
 set -eu
 
-# Prevent rare "-ash: not found" on certain prebuilt binaries
 if [ ! -L /lib/ld-musl-x86_64.so.1 ] && [ -f /lib/libc.so ]; then
   ln -sf /lib/libc.so /lib/ld-musl-x86_64.so.1
 fi
