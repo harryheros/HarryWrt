@@ -4,8 +4,9 @@ set -euo pipefail
 # ============================================================
 # HarryWrt DIY Script (OpenWrt 24.10.5 / Clean)
 # - Branding (banner/motd/DISTRIB_DESCRIPTION)
-# - Force LuCI default theme to Bootstrap (Argon remains optional)
-# - Fix Go toolchain lock for geoview (Go >= 1.24): GOTOOLCHAIN=auto
+# - Default LuCI theme forced to Bootstrap (Argon remains optional)
+# - Fix Go toolchain policy for geoview (Go >= 1.24): GOTOOLCHAIN=auto
+# - Auto-fix Passwall2 core init on first boot (only if installed)
 # ============================================================
 
 FILES_DIR="files"
@@ -14,52 +15,34 @@ mkdir -p "${FILES_DIR}/etc/config"
 mkdir -p "${FILES_DIR}/etc/uci-defaults"
 
 # ------------------------------------------------------------
-# 0) Build-time fix: allow Go toolchain auto-download
-#    IMPORTANT:
-#    - Patch ONLY specific files to avoid "mass sed" corrupting .mk files
-#    - Ensure NO leading spaces: must be GOTOOLCHAIN=auto (not " auto")
+# 0) Build-time fix: Go toolchain policy for geoview
+#    OpenWrt 24.10.x uses Go 1.23.x, and feeds may force GOTOOLCHAIN=local.
+#    We patch both '=' and ':=' to ensure GOTOOLCHAIN=auto (NO SPACE).
 # ------------------------------------------------------------
 echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto) ..."
 
-GOLANG_DIR="feeds/packages/lang/golang"
+GOLANG_PKG_MK="feeds/packages/lang/golang/golang-package.mk"
+GOLANG_BUILD_SH="feeds/packages/lang/golang/golang-build.sh"
 
-patch_gotoolchain_file() {
-  local f="$1"
-  [ -f "$f" ] || return 0
-
-  # Replace:
-  #   <spaces>GOTOOLCHAIN=local
-  #   <spaces>GOTOOLCHAIN:=local
-  #   <spaces>GOTOOLCHAIN ?= local
-  # into:
-  #   same assignment operator, value becomes "auto" with NO leading spaces
-  sed -i -E "s/^([[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=)[[:space:]]*local/\1auto/g" "$f"
-
-  # Some files may use export form
-  sed -i -E "s/^([[:space:]]*export[[:space:]]+GOTOOLCHAIN=)[[:space:]]*local/\1auto/g" "$f"
-}
-
-# Patch the two known lock points
-patch_gotoolchain_file "${GOLANG_DIR}/golang-build.sh"
-patch_gotoolchain_file "${GOLANG_DIR}/golang-package.mk"
-
-# Also patch any other .mk that might define it (safe: only .mk files, only exact var)
-if [ -d "$GOLANG_DIR" ]; then
-  while IFS= read -r -d '' f; do
-    patch_gotoolchain_file "$f"
-  done < <(find "$GOLANG_DIR" -maxdepth 2 -type f \( -name "*.mk" -o -name "*.sh" \) -print0)
+# Patch 0.1 & 0.2: Broad match for both '=' and ':=' to prevent bypass
+# Use [[:space:]]* to handle any spacing around the assignment operator
+if [ -f "$GOLANG_PKG_MK" ]; then
+  sed -i -E 's/\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b/GOTOOLCHAIN=auto/g' "$GOLANG_PKG_MK"
 fi
 
-# Sanity check: fail fast if still locked OR if someone produced "GOTOOLCHAIN= auto"
-if grep -RInE "^[[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=[[:space:]]*local" "$GOLANG_DIR" >/dev/null 2>&1; then
-  echo "ERROR: still found GOTOOLCHAIN=local after patch" >&2
-  grep -RInE "^[[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=[[:space:]]*local" "$GOLANG_DIR" | head -n 50 >&2 || true
-  exit 1
+if [ -f "$GOLANG_BUILD_SH" ]; then
+  sed -i -E 's/\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b/GOTOOLCHAIN=auto/g' "$GOLANG_BUILD_SH"
 fi
 
-if grep -RInE "^[[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=[[:space:]]+auto" "$GOLANG_DIR" >/dev/null 2>&1; then
-  echo "ERROR: found leading-space value 'GOTOOLCHAIN= auto' (will break builds)" >&2
-  grep -RInE "^[[:space:]]*GOTOOLCHAIN[[:space:]]*[:?]?=[[:space:]]+auto" "$GOLANG_DIR" | head -n 50 >&2 || true
+# Patch 0.3: Extra safety for potential "GOTOOLCHAIN= auto" (space after '=')
+# This handles the specific failure seen in sing-box builds
+find feeds/packages/lang/golang -type f -print0 2>/dev/null | xargs -0 -r sed -i -E 's/\bGOTOOLCHAIN=[[:space:]]+auto\b/GOTOOLCHAIN=auto/g'
+
+# Patch 0.4 sanity check (fail fast)
+# Verify no 'local' remain and no broken 'GOTOOLCHAIN= auto' exist
+if grep -RInE '\bGOTOOLCHAIN([[:space:]]*:?=[[:space:]]*local|=[[:space:]]+auto)\b' feeds/packages/lang/golang >/dev/null 2>&1; then
+  echo "ERROR: GOTOOLCHAIN patch failed or created invalid syntax (space after =)." >&2
+  grep -RInE '\bGOTOOLCHAIN([[:space:]]*:?=[[:space:]]*local|=[[:space:]]+auto)\b' feeds/packages/lang/golang | head -n 20 >&2 || true
   exit 1
 fi
 
@@ -104,7 +87,7 @@ HarryWrt 24.10.5 - Clean Edition (based on OpenWrt)
 EOF
 
 # ------------------------------------------------------------
-# 4) UCI defaults: Branding (DISTRIB_DESCRIPTION / PRETTY_NAME)
+# 4) UCI defaults: branding + release description
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'EOF'
 #!/bin/sh
@@ -129,8 +112,7 @@ EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 # ------------------------------------------------------------
-# 5) Force LuCI default theme to official Bootstrap (stock-like)
-#    Argon remains installed but NOT default
+# 5) Force LuCI default theme to Bootstrap (stock-like)
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/99-force-default-theme" <<'EOF'
 #!/bin/sh
@@ -144,5 +126,31 @@ fi
 exit 0
 EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/99-force-default-theme"
+
+# ------------------------------------------------------------
+# 6) Auto-fix Passwall2 Core Initialization
+#    Ensures firewall rules apply correctly on first boot/install
+# ------------------------------------------------------------
+cat > "${FILES_DIR}/etc/uci-defaults/99-passwall2-autofix" <<'EOF'
+#!/bin/sh
+set -eu
+
+MARK="/etc/passwall2_autofix_done"
+
+# Only act if passwall2 is present
+[ -x /etc/init.d/passwall2 ] || exit 0
+[ -f "$MARK" ] && exit 0
+
+# Restart firewall to ensure nftables rules are loaded
+/etc/init.d/firewall restart >/dev/null 2>&1 || true
+sleep 2
+
+# Restart passwall2 service
+/etc/init.d/passwall2 restart >/dev/null 2>&1 || true
+
+touch "$MARK" 2>/dev/null || true
+exit 0
+EOF
+chmod 0755 "${FILES_DIR}/etc/uci-defaults/99-passwall2-autofix"
 
 echo "DIY script executed successfully."
