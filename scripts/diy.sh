@@ -3,46 +3,16 @@ set -euo pipefail
 
 # ============================================================
 # HarryWrt DIY Script (OpenWrt 24.10.5 / Clean)
-# - Build-time fix: geoview requires Go >= 1.24 (GOTOOLCHAIN=auto)
 # - Branding (banner/motd/DISTRIB_DESCRIPTION)
-# - Force default LuCI theme to Bootstrap (Argon remains optional)
+# - Force LuCI default theme to Bootstrap (Argon remains optional)
+# - Passwall2 fw4 reload fix (auto restart firewall+passwall2 on iface ifup)
 # ============================================================
 
 FILES_DIR="files"
 
 mkdir -p "${FILES_DIR}/etc/config"
 mkdir -p "${FILES_DIR}/etc/uci-defaults"
-
-# ------------------------------------------------------------
-# 0) Build-time fix: geoview requires Go >= 1.24
-#    OpenWrt 24.10.x ships Go 1.23.x and locks GOTOOLCHAIN=local in golang mk.
-#    Patch ONLY golang feed files to allow auto toolchain download.
-#    IMPORTANT: keep "GOTOOLCHAIN=auto" with NO spaces.
-# ------------------------------------------------------------
-echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto) ..."
-
-GOLANG_DIR="feeds/packages/lang/golang"
-
-if [ -d "${GOLANG_DIR}" ]; then
-  # Patch both "GOTOOLCHAIN=local" and "GOTOOLCHAIN:=local"
-  # Also normalize accidental "GOTOOLCHAIN= auto" -> "GOTOOLCHAIN=auto"
-  find "${GOLANG_DIR}" -type f -print0 | xargs -0 sed -i \
-    -e 's/^[[:space:]]*GOTOOLCHAIN[[:space:]]*=[[:space:]]*local[[:space:]]*$/GOTOOLCHAIN=auto/g' \
-    -e 's/^[[:space:]]*GOTOOLCHAIN[[:space:]]*:=[[:space:]]*local[[:space:]]*$/GOTOOLCHAIN:=auto/g' \
-    -e 's/GOTOOLCHAIN[[:space:]]*=[[:space:]]*auto/GOTOOLCHAIN=auto/g' \
-    -e 's/GOTOOLCHAIN[[:space:]]*:[[:space:]]*=[[:space:]]*auto/GOTOOLCHAIN:=auto/g'
-
-  # Fail fast if still locked to local anywhere
-  if grep -RInE '^[[:space:]]*GOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local([[:space:]]*$)' "${GOLANG_DIR}" >/dev/null 2>&1; then
-    echo "ERROR: still found GOTOOLCHAIN=local after patch" >&2
-    grep -RInE '^[[:space:]]*GOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local([[:space:]]*$)' "${GOLANG_DIR}" | head -n 50 >&2 || true
-    exit 1
-  fi
-
-  echo "[patch] Go toolchain policy patched OK."
-else
-  echo "[patch] WARNING: ${GOLANG_DIR} not found (feeds not installed yet?)"
-fi
+mkdir -p "${FILES_DIR}/etc/hotplug.d/iface"
 
 # ------------------------------------------------------------
 # 1) System defaults (hostname, timezone)
@@ -83,7 +53,7 @@ HarryWrt 24.10.5 - Clean Edition (based on OpenWrt)
 EOF
 
 # ------------------------------------------------------------
-# 4) UCI defaults: branding (release description)
+# 4) UCI defaults: Branding + release description
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'EOF'
 #!/bin/sh
@@ -91,6 +61,7 @@ set -eu
 
 DESC="HarryWrt 24.10.5 Clean (based on OpenWrt)"
 
+# Best-effort branding in release files
 if [ -f /etc/openwrt_release ]; then
   sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='${DESC}'/" /etc/openwrt_release 2>/dev/null || true
 fi
@@ -109,7 +80,7 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 # ------------------------------------------------------------
 # 5) Force LuCI default theme to Bootstrap (stock-like)
-#    Use 99 to ensure it runs LAST.
+#    Use 99 to ensure it runs late (after other uci-defaults)
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/99-force-default-theme" <<'EOF'
 #!/bin/sh
@@ -123,5 +94,30 @@ fi
 exit 0
 EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/99-force-default-theme"
+
+# ------------------------------------------------------------
+# 6) Fix Passwall2 fw4 reload issue (auto-restart on iface ifup)
+#    Avoids "Core not running until reboot" confusion.
+# ------------------------------------------------------------
+cat > "${FILES_DIR}/etc/hotplug.d/iface/99-passwall2-fix-fw4" <<'EOF'
+#!/bin/sh
+# HarryWrt: Fix Passwall2 not applying fw4 rules after restart/reset
+# Trigger: interface comes up (ifup)
+# Action: restart firewall + passwall2 if installed
+
+[ "$ACTION" = "ifup" ] || exit 0
+
+# only run if passwall2 exists
+[ -x /etc/init.d/passwall2 ] || exit 0
+
+logger -t harrywrt "iface ifup detected, restarting firewall + passwall2 for fw4 compatibility..."
+
+(/etc/init.d/firewall restart >/dev/null 2>&1 || true) &
+sleep 1
+(/etc/init.d/passwall2 restart >/dev/null 2>&1 || true) &
+
+exit 0
+EOF
+chmod 0755 "${FILES_DIR}/etc/hotplug.d/iface/99-passwall2-fix-fw4"
 
 echo "DIY script executed successfully."
