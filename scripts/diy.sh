@@ -6,6 +6,8 @@ set -euo pipefail
 # - Branding (banner/motd/DISTRIB_DESCRIPTION)
 # - Default LuCI theme forced to Bootstrap (Argon remains optional)
 # - Fix Go toolchain policy for geoview (Go >= 1.24): GOTOOLCHAIN=auto
+# - Defense-grade regex for Go toolchain patching (= or :=)
+# - Auto-fix Passwall2 Core (Ensures first-run success)
 # ============================================================
 
 FILES_DIR="files"
@@ -15,25 +17,24 @@ mkdir -p "${FILES_DIR}/etc/uci-defaults"
 
 # ------------------------------------------------------------
 # 0) Build-time fix: Go toolchain policy for geoview
-#    OpenWrt 24.10.x uses Go 1.23.x, and feeds may force GOTOOLCHAIN=local.
-#    We patch the real injector: golang-package.mk, plus golang-build.sh.
-#    IMPORTANT: must become exactly "GOTOOLCHAIN=auto" (NO SPACE).
+#    Using Defense-grade regex to match both '=' and ':='
+#    Ensures exactly "GOTOOLCHAIN=auto" with NO SPACE.
 # ------------------------------------------------------------
 echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto) ..."
 
-# Patch 0.1: golang-package.mk
 GOLANG_PKG_MK="feeds/packages/lang/golang/golang-package.mk"
-if [ -f "$GOLANG_PKG_MK" ]; then
-  sed -i -E 's/\bGOTOOLCHAIN=local\b/GOTOOLCHAIN=auto/g' "$GOLANG_PKG_MK"
-fi
-
-# Patch 0.2: golang-build.sh
 GOLANG_BUILD_SH="feeds/packages/lang/golang/golang-build.sh"
-if [ -f "$GOLANG_BUILD_SH" ]; then
-  sed -i -E 's/\bGOTOOLCHAIN=local\b/GOTOOLCHAIN=auto/g' "$GOLANG_BUILD_SH"
+
+# Patch 0.1 & 0.2: Match assignment with or without colon (GOTOOLCHAIN= or GOTOOLCHAIN:=)
+if [ -f "$GOLANG_PKG_MK" ]; then
+  sed -i -E 's/\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b/GOTOOLCHAIN=auto/g' "$GOLANG_PKG_MK"
 fi
 
-# Patch 0.3: clean up any accidental "GOTOOLCHAIN= auto"
+if [ -f "$GOLANG_BUILD_SH" ]; then
+  sed -i -E 's/\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b/GOTOOLCHAIN=auto/g' "$GOLANG_BUILD_SH"
+fi
+
+# Patch 0.3: Clean up any accidental "GOTOOLCHAIN= auto" (space after '=')
 find feeds/packages/lang/golang -type f -print0 2>/dev/null | xargs -0 -r sed -i -E 's/\bGOTOOLCHAIN=[[:space:]]+auto\b/GOTOOLCHAIN=auto/g'
 
 # Patch 0.4 sanity check (fail fast)
@@ -42,15 +43,15 @@ if grep -RInE '\bGOTOOLCHAIN=[[:space:]]+auto\b' feeds/packages/lang/golang >/de
   exit 1
 fi
 
-if grep -RInE '\bGOTOOLCHAIN=local\b' feeds/packages/lang/golang >/dev/null 2>&1; then
-  echo "ERROR: still found 'GOTOOLCHAIN=local' after patch." >&2
+if grep -RInE '\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b' feeds/packages/lang/golang >/dev/null 2>&1; then
+  echo "ERROR: still found GOTOOLCHAIN=local after patch." >&2
   exit 1
 fi
 
 echo "[patch] Go toolchain policy patched OK."
 
 # ------------------------------------------------------------
-# 1) System defaults (hostname, timezone)
+# 1) System defaults (Full config from your success version)
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/config/system" <<'EOF'
 config system
@@ -122,7 +123,7 @@ EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/99-force-default-theme"
 
 # ------------------------------------------------------------
-# 6) Auto-fix Passwall2 Core (New addition to your success version)
+# 6) Auto-fix Passwall2 Core (First-boot initialization)
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/98-passwall2-autofix" <<'EOF'
 #!/bin/sh
