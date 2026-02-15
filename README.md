@@ -88,6 +88,9 @@ You can access LuCI Web UI at:
 
 https://192.168.1.1
 
+To change LAN IP address:
+vi /etc/config/network
+
 Note: Your browser may show an SSL warning due to the self-signed certificate. This is normal.
 
 ---
