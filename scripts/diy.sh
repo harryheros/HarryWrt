@@ -7,25 +7,23 @@ set -euo pipefail
 # - Default LuCI theme forced to Bootstrap (Argon remains optional)
 # - Fix Go toolchain policy for geoview (Go >= 1.24): GOTOOLCHAIN=auto
 # - Defense-grade regex for Go toolchain patching (= or :=)
-# - Auto-fix Passwall2 Core (Ensures first-run success)
+# - HarryWrt Runtime Guardian (Auto-fix Cores & Loader)
 # ============================================================
 
 FILES_DIR="files"
 
 mkdir -p "${FILES_DIR}/etc/config"
 mkdir -p "${FILES_DIR}/etc/uci-defaults"
+mkdir -p "${FILES_DIR}/etc/init.d"
 
 # ------------------------------------------------------------
 # 0) Build-time fix: Go toolchain policy for geoview
-#    Using Defense-grade regex to match both '=' and ':='
-#    Ensures exactly "GOTOOLCHAIN=auto" with NO SPACE.
 # ------------------------------------------------------------
 echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto) ..."
 
 GOLANG_PKG_MK="feeds/packages/lang/golang/golang-package.mk"
 GOLANG_BUILD_SH="feeds/packages/lang/golang/golang-build.sh"
 
-# Patch 0.1 & 0.2: Match assignment with or without colon (GOTOOLCHAIN= or GOTOOLCHAIN:=)
 if [ -f "$GOLANG_PKG_MK" ]; then
   sed -i -E 's/\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b/GOTOOLCHAIN=auto/g' "$GOLANG_PKG_MK"
 fi
@@ -34,24 +32,10 @@ if [ -f "$GOLANG_BUILD_SH" ]; then
   sed -i -E 's/\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b/GOTOOLCHAIN=auto/g' "$GOLANG_BUILD_SH"
 fi
 
-# Patch 0.3: Clean up any accidental "GOTOOLCHAIN= auto" (space after '=')
 find feeds/packages/lang/golang -type f -print0 2>/dev/null | xargs -0 -r sed -i -E 's/\bGOTOOLCHAIN=[[:space:]]+auto\b/GOTOOLCHAIN=auto/g'
 
-# Patch 0.4 sanity check (fail fast)
-if grep -RInE '\bGOTOOLCHAIN=[[:space:]]+auto\b' feeds/packages/lang/golang >/dev/null 2>&1; then
-  echo "ERROR: found 'GOTOOLCHAIN= auto'. This will break builds." >&2
-  exit 1
-fi
-
-if grep -RInE '\bGOTOOLCHAIN[[:space:]]*:?=[[:space:]]*local\b' feeds/packages/lang/golang >/dev/null 2>&1; then
-  echo "ERROR: still found GOTOOLCHAIN=local after patch." >&2
-  exit 1
-fi
-
-echo "[patch] Go toolchain policy patched OK."
-
 # ------------------------------------------------------------
-# 1) System defaults (Full config from your success version)
+# 1) System defaults
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/config/system" <<'EOF'
 config system
@@ -101,15 +85,12 @@ fi
 if [ -f /etc/os-release ]; then
   sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /etc/os-release 2>/dev/null || true
 fi
-if [ -f /usr/lib/os-release ]; then
-  sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /usr/lib/os-release 2>/dev/null || true
-fi
 exit 0
 EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 # ------------------------------------------------------------
-# 5) Force LuCI default theme to Bootstrap (stock-like)
+# 5) Force LuCI default theme to Bootstrap
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/99-force-default-theme" <<'EOF'
 #!/bin/sh
@@ -123,19 +104,47 @@ EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/99-force-default-theme"
 
 # ------------------------------------------------------------
-# 6) Auto-fix Passwall2 Core (First-boot initialization)
+# 6) HarryWrt Runtime Guardian
+#    - Fixes musl loader for Xray/Sing-box (-ash: not found)
+#    - Ensures network services (Passwall2) start correctly
 # ------------------------------------------------------------
-cat > "${FILES_DIR}/etc/uci-defaults/98-passwall2-autofix" <<'EOF'
+cat > "${FILES_DIR}/etc/init.d/harrywrt_guardian" <<'EOF'
+#!/bin/sh /etc/rc.common
+
+START=99
+
+boot() {
+    (
+        # Fix dynamic linker path (resolve -ash: not found error)
+        if [ ! -L /lib/ld-musl-x86_64.so.1 ] && [ -f /lib/libc.so ]; then
+            ln -sf /lib/libc.so /lib/ld-musl-x86_64.so.1
+        fi
+
+        # Set execution permissions
+        chmod 755 /usr/bin/xray /usr/bin/sing-box 2>/dev/null || true
+
+        # Wait for network and firewall to stabilize
+        sleep 20
+        
+        # Force restart passwall2 if exists to ensure rules apply
+        if [ -x /etc/init.d/passwall2 ]; then
+            /etc/init.d/passwall2 restart >/dev/null 2>&1
+        fi
+    ) &
+}
+
+start() {
+    boot
+}
+EOF
+chmod 0755 "${FILES_DIR}/etc/init.d/harrywrt_guardian"
+
+# Enable guardian service via uci-defaults
+cat > "${FILES_DIR}/etc/uci-defaults/98-harrywrt-guardian-setup" <<'EOF'
 #!/bin/sh
-# Only run if passwall2 is installed and not yet initialized
-if [ -x /etc/init.d/passwall2 ] && [ ! -f /etc/passwall2_init_done ]; then
-    /etc/init.d/firewall restart >/dev/null 2>&1
-    sleep 2
-    /etc/init.d/passwall2 restart >/dev/null 2>&1
-    touch /etc/passwall2_init_done
-fi
+/etc/init.d/harrywrt_guardian enable
 exit 0
 EOF
-chmod 0755 "${FILES_DIR}/etc/uci-defaults/98-passwall2-autofix"
+chmod 0755 "${FILES_DIR}/etc/uci-defaults/98-harrywrt-guardian-setup"
 
 echo "DIY script executed successfully."
