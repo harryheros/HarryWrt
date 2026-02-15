@@ -86,14 +86,14 @@ jobs:
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
-      - name: Add Passwall packages feed (offline deps)
+      - name: Add Passwall packages feed (for offline deps)
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
 
-      - name: Add extra packages (Argon theme source)
+      - name: Add extra packages (Argon theme sources)
         shell: bash
         run: |
           set -euo pipefail
@@ -110,39 +110,28 @@ jobs:
           ./scripts/feeds update -a 2>&1 | tee -a build.log
           ./scripts/feeds install -a -f 2>&1 | tee -a build.log
 
-      - name: Apply config and run DIY (with hardening)
+      - name: Apply config and run DIY
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
 
-          # 1) Load base config
           cp "${GITHUB_WORKSPACE}/configs/x86_64-clean.config" .config
 
-          # 2) Run DIY (must be after feeds install)
           chmod +x "${GITHUB_WORKSPACE}/scripts/diy.sh"
           bash "${GITHUB_WORKSPACE}/scripts/diy.sh" 2>&1 | tee -a build.log
 
-          # 3) Generate dependency tree
+          # 1) First defconfig
           make defconfig 2>&1 | tee -a build.log
 
-          # 4) Sanitize .config to avoid "missing separator"
-          sed -i 's/\r$//' .config
-          sed -i -E 's/^[[:space:]]+//' .config
+          # 2) Defense-grade "補票" (official OpenWrt way)
+          ./scripts/config set PACKAGE_iptables
+          ./scripts/config set PACKAGE_ip6tables
+          ./scripts/config set PACKAGE_procps-ng-ps
+          ./scripts/config set PACKAGE_kmodloader
 
-          # 5) Force-keep compatibility packages (precise replace)
-          sed -i -E 's|^# (CONFIG_PACKAGE_iptables) is not set$|\1=y|' .config
-          sed -i -E 's|^# (CONFIG_PACKAGE_ip6tables) is not set$|\1=y|' .config
-          sed -i -E 's|^# (CONFIG_PACKAGE_procps-ng-ps) is not set$|\1=y|' .config
-
-          # Fallback append if not present
-          for pkg in CONFIG_PACKAGE_iptables CONFIG_PACKAGE_ip6tables CONFIG_PACKAGE_procps-ng-ps; do
-            grep -q "^${pkg}=y$" .config || echo "${pkg}=y" >> .config
-          done
-
-          # Re-sanitize (defense-in-depth)
-          sed -i 's/\r$//' .config
-          sed -i -E 's/^[[:space:]]+//' .config
+          # 3) Second defconfig to resolve dependencies
+          make defconfig 2>&1 | tee -a build.log
 
           echo "Checking important packages in final .config..." | tee -a build.log
 
@@ -151,11 +140,12 @@ jobs:
             "CONFIG_PACKAGE_iptables-nft"
             "CONFIG_PACKAGE_iptables"
             "CONFIG_PACKAGE_ip6tables"
+            "CONFIG_PACKAGE_procps-ng-ps"
+            "CONFIG_PACKAGE_kmodloader"
             "CONFIG_PACKAGE_kmod-nft-tproxy"
             "CONFIG_PACKAGE_kmod-nft-socket"
             "CONFIG_PACKAGE_kmod-nft-compat"
             "CONFIG_PACKAGE_kmod-tun"
-            "CONFIG_PACKAGE_kmodloader"
             "CONFIG_PACKAGE_libev"
             "CONFIG_PACKAGE_libsodium"
             "CONFIG_PACKAGE_libudns"
@@ -165,7 +155,6 @@ jobs:
             "CONFIG_PACKAGE_coreutils-base64"
             "CONFIG_PACKAGE_coreutils-nohup"
             "CONFIG_PACKAGE_libuci-lua"
-            "CONFIG_PACKAGE_procps-ng-ps"
             "CONFIG_PACKAGE_tcping"
             "CONFIG_PACKAGE_geoview"
             "CONFIG_PACKAGE_v2ray-geoip"
@@ -265,8 +254,9 @@ jobs:
             Profile: Clean Edition
 
             Notes:
-            - Argon theme is included but default UI remains Bootstrap (stock-like).
-            - Offline-friendly base (common compatibility deps included).
+            - Argon theme is included but the default UI remains Bootstrap (stock-like).
+            - Offline-ready base: includes common runtime deps and engines.
+              Users can upload extra .ipk locally without relying on remote feeds.
 
             Recommended:
             - squashfs-uefi for UEFI systems
