@@ -86,14 +86,14 @@ jobs:
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
-      - name: Add Passwall packages feed (for offline deps)
+      - name: Add Passwall packages feed
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
 
-      - name: Add extra packages (Argon theme sources)
+      - name: Add extra packages (Argon theme source)
         shell: bash
         run: |
           set -euo pipefail
@@ -116,42 +116,36 @@ jobs:
           set -euo pipefail
           cd openwrt
 
+          # 1) Load base config
           cp "${GITHUB_WORKSPACE}/configs/x86_64-clean.config" .config
+          sed -i 's/\r$//' .config
 
+          # 2) Run DIY
           chmod +x "${GITHUB_WORKSPACE}/scripts/diy.sh"
           bash "${GITHUB_WORKSPACE}/scripts/diy.sh" 2>&1 | tee -a build.log
 
-          # 1) First defconfig
+          # 3) First defconfig (OpenWrt may prune some items)
           make defconfig 2>&1 | tee -a build.log
 
-          # 2) Defense-grade ensure: set critical options via Kconfig conf (avoid format issues)
-          CONF="./scripts/config/conf"
-          if [[ ! -x "$CONF" ]]; then
-            echo "ERROR: $CONF not found/executable" | tee -a build.log
-            ls -lah ./scripts/config | tee -a build.log || true
-            exit 1
-          fi
-
-          # Remove CRLF just in case (prevents 'missing separator')
-          sed -i 's/\r$//' .config
-
-          "$CONF" --file .config --set-val CONFIG_PACKAGE_iptables y
-          "$CONF" --file .config --set-val CONFIG_PACKAGE_ip6tables y
-          "$CONF" --file .config --set-val CONFIG_PACKAGE_procps-ng-ps y
-          "$CONF" --file .config --set-val CONFIG_PACKAGE_kmodloader y
-
-          # 3) Final defconfig (lets Kconfig settle deps)
-          make defconfig 2>&1 | tee -a build.log
-
-          echo "Checking important packages in final .config..." | tee -a build.log
-
-          MUST_Y=(
-            "CONFIG_PACKAGE_dnsmasq-full"
-            "CONFIG_PACKAGE_iptables-nft"
+          # 4) Ticket required packages back in (format-safe)
+          EXTRA_PKGS=(
             "CONFIG_PACKAGE_iptables"
             "CONFIG_PACKAGE_ip6tables"
             "CONFIG_PACKAGE_procps-ng-ps"
             "CONFIG_PACKAGE_kmodloader"
+          )
+          for pkg in "${EXTRA_PKGS[@]}"; do
+            sed -i 's/\r$//' .config
+            sed -i "/^${pkg}=.*/d" .config
+            sed -i "/^[# ]*${pkg} is not set$/d" .config
+            printf "\n%s=y\n" "${pkg}" >> .config
+          done
+
+          # 5) QA checks (do not run defconfig again)
+          echo "Checking important packages in final .config..." | tee -a build.log
+          MUST_Y=(
+            "CONFIG_PACKAGE_dnsmasq-full"
+            "CONFIG_PACKAGE_iptables-nft"
             "CONFIG_PACKAGE_kmod-nft-tproxy"
             "CONFIG_PACKAGE_kmod-nft-socket"
             "CONFIG_PACKAGE_kmod-nft-compat"
@@ -171,10 +165,10 @@ jobs:
             "CONFIG_PACKAGE_v2ray-geosite"
             "CONFIG_PACKAGE_xray-core"
             "CONFIG_PACKAGE_sing-box"
-          )
-
-          OPTIONAL_Y=(
-            "CONFIG_PACKAGE_luci-theme-argon"
+            "CONFIG_PACKAGE_iptables"
+            "CONFIG_PACKAGE_ip6tables"
+            "CONFIG_PACKAGE_procps-ng-ps"
+            "CONFIG_PACKAGE_kmodloader"
           )
 
           missing=0
@@ -184,14 +178,6 @@ jobs:
             else
               echo "MISSING: ${k}=y" | tee -a build.log
               missing=1
-            fi
-          done
-
-          for k in "${OPTIONAL_Y[@]}"; do
-            if grep -qE "^${k}=y$" .config; then
-              echo "OK: ${k}=y (optional)" | tee -a build.log
-            else
-              echo "NOTE: ${k} is not enabled (optional)" | tee -a build.log
             fi
           done
 
@@ -214,7 +200,7 @@ jobs:
           cd openwrt
           make -j"$(nproc)" 2>&1 | tee -a build.log || make -j1 V=s 2>&1 | tee -a build.log
 
-      - name: Organize and rename files (HarryWrt naming)
+      - name: Organize and rename files
         shell: bash
         run: |
           set -euo pipefail
@@ -262,25 +248,6 @@ jobs:
           body: |
             Base: OpenWrt 24.10.5 (x86_64)
             Profile: Clean Edition
-
-            Notes:
-            - Argon theme is included but the default UI remains Bootstrap (stock-like).
-            - This build is offline-ready for popular LuCI apps:
-              includes geodata/tcping/common runtime deps and proxy engines (xray/sing-box).
-
-            Recommended:
-            - squashfs-uefi for UEFI systems
-            - squashfs-bios for legacy BIOS systems
-
-            Default:
-            - Hostname: HarryWrt
-            - Timezone: Asia/Hong_Kong
-
-            Rootfs:
-            - 1024MB (1GB)
-
-            Integrity:
-            - SHA256SUMS is attached to this release
           files: |
             openwrt/bin/targets/x86/64/HarryWrt-${{ env.OWRT_BASE }}-${{ env.PROFILE }}-${{ steps.meta.outputs.release }}-${{ env.TARGET }}-*.img.gz
             openwrt/bin/targets/x86/64/SHA256SUMS
