@@ -136,7 +136,6 @@ jobs:
             "CONFIG_PACKAGE_kmod-nft-socket"
             "CONFIG_PACKAGE_kmod-nft-compat"
             "CONFIG_PACKAGE_kmod-tun"
-            "CONFIG_PACKAGE_kmodloader"
             "CONFIG_PACKAGE_libev"
             "CONFIG_PACKAGE_libsodium"
             "CONFIG_PACKAGE_libudns"
