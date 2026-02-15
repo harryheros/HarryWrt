@@ -1,10 +1,11 @@
 # HarryWrt
+
 [![License: GPL v2](https://img.shields.io/badge/License-GPLv2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![Platform](https://img.shields.io/badge/Platform-BIOS%20%7C%20UEFI-orange.svg)](#)
 
 **HarryWrt** is a clean and stable OpenWrt firmware build, focused on reliability, performance, and long-term usability.
 
-This project is built on official **OpenWrt 24.10.5** sources and is designed for users who want a minimal but powerful base system with extra utilities and expanded storage space for future customization.
+This project is built on official **OpenWrt 24.10.5** sources and is designed for users who want a minimal but powerful base system with useful built-in tools and expanded storage space for future customization.
 
 ---
 
@@ -27,7 +28,7 @@ It keeps the official OpenWrt experience and interface style while improving the
 - Base: OpenWrt 24.10.5
 - Target: x86_64 (generic)
 - Edition: Clean
-- Rootfs size: **1024MB (1GB)**
+- Rootfs size: 1024MB (1GB)
 
 ---
 
@@ -41,7 +42,7 @@ It keeps the official OpenWrt experience and interface style while improving the
 ### Theme
 
 - Argon theme is included
-- Argon is **NOT enabled by default**
+- Argon is NOT enabled by default
 - Default UI remains the official OpenWrt style
 
 ### Tools
@@ -71,21 +72,23 @@ It keeps the official OpenWrt experience and interface style while improving the
 
 ## Default Settings
 
-- Hostname: `HarryWrt`
-- Timezone: `Asia/Hong_Kong`
-- Default IP: `192.168.1.1`
-- Default login: `root`
+- Hostname: HarryWrt
+- Timezone: Asia/Hong_Kong
+- Default LAN IP: 192.168.1.1
+- Default login: root
 - Default password: (none)
 
 ---
 
 ## Web UI Access
 
-After booting, OpenWrt will obtain an IP address via DHCP.
+After booting, HarryWrt will use the default LAN address and provide DHCP service for connected clients.
 
 You can access LuCI Web UI at:
 
 https://192.168.1.1
+
+Note: Your browser may show an SSL warning due to the self-signed certificate. This is normal.
 
 ---
 
@@ -95,8 +98,8 @@ HarryWrt provides both BIOS and UEFI images.
 
 Recommended choices:
 
-- **squashfs-uefi.img.gz** (most modern systems)
-- **squashfs-bios.img.gz** (legacy BIOS systems)
+- squashfs-uefi.img.gz (most modern systems)
+- squashfs-bios.img.gz (legacy BIOS systems)
 
 ---
 
@@ -106,17 +109,17 @@ Argon theme is included but not enabled by default.
 
 To enable it:
 
-LuCI → System → System → Language and Style → Theme → Argon
+LuCI -> System -> System -> Language and Style -> Theme -> Argon
 
 ---
 
-## Optional: Install Passwall2
+## Optional: Install Additional LuCI Applications
 
-HarryWrt Clean Edition does not include Passwall2 by default.
+HarryWrt Clean Edition does not include extra LuCI applications by default.
 
-Users can install Passwall2 manually from the upstream project releases.
+Users may install additional LuCI packages manually by uploading .ipk files through the Web UI or installing via SSH.
 
-Upstream project:
+Upstream packages and projects:
 
 https://github.com/Openwrt-Passwall/openwrt-passwall2
 
@@ -124,7 +127,7 @@ https://github.com/Openwrt-Passwall/openwrt-passwall2
 
 ## Integrity Verification
 
-Each release includes a `SHA256SUMS` file.
+Each release includes a SHA256SUMS file.
 
 You can verify the downloaded images:
 
@@ -155,7 +158,6 @@ This repository includes build scripts and configurations that follow the same o
 - OpenWrt Project
 - LuCI Project
 - Argon Theme by jerrykuku
-- Passwall2 Project
 - GitHub Actions build system
 
 ---
