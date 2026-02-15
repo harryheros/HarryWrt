@@ -7,6 +7,8 @@ on:
         description: "Release version (e.g. v1.0)"
         required: true
         default: "v1.0"
+        type: string
+
   push:
     tags:
       - "clean-24.10.5-v*"
@@ -62,6 +64,7 @@ jobs:
           sudo chmod 600 "$SWAP_PATH"
           sudo mkswap "$SWAP_PATH"
           sudo swapon "$SWAP_PATH"
+
           sudo swapon --show
           free -h
 
@@ -86,21 +89,20 @@ jobs:
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
-      - name: Add Passwall packages feed (for offline Passwall2 deps)
+      - name: Add Passwall packages feed (for geoview/tcping/geoip/geosite)
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
-          # Provide tcping/geoview/v2ray-geoip/v2ray-geosite as buildable packages
+          # Provide packages required for offline installing luci-app-passwall2.ipk
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
+          tail -n +1 feeds.conf.default | sed -n '1,120p'
 
-      - name: Add extra packages (Argon theme sources)
+      - name: Add extra packages (Argon theme source)
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
-
-          # Argon theme source into buildroot
           mkdir -p package/extra
           rm -rf package/extra/luci-theme-argon || true
           git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git package/extra/luci-theme-argon 2>&1 | tee -a build.log
@@ -113,71 +115,69 @@ jobs:
           ./scripts/feeds update -a 2>&1 | tee -a build.log
           ./scripts/feeds install -a -f 2>&1 | tee -a build.log
 
-      - name: Apply config and run DIY
+      - name: Apply config + run DIY (MUST be before make defconfig)
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
 
+          # 1) Load .config FIRST
           cp "${GITHUB_WORKSPACE}/configs/x86_64-clean.config" .config
 
+          # 2) Run DIY (patch Go toolchain policy + generate files/)
           chmod +x "${GITHUB_WORKSPACE}/scripts/diy.sh"
           bash "${GITHUB_WORKSPACE}/scripts/diy.sh" 2>&1 | tee -a build.log
 
+          # 3) Expand deps
           make defconfig 2>&1 | tee -a build.log
 
-          echo "Checking important packages in final .config..." | tee -a build.log
+          echo "Checking key packages in final .config..." | tee -a build.log
 
           MUST_Y=(
-            "CONFIG_PACKAGE_dnsmasq-full"
-            "CONFIG_PACKAGE_iptables-nft"
-            "CONFIG_PACKAGE_kmod-nft-tproxy"
-            "CONFIG_PACKAGE_kmod-nft-socket"
-            "CONFIG_PACKAGE_kmod-nft-compat"
-            "CONFIG_PACKAGE_kmod-tun"
-            "CONFIG_PACKAGE_libev"
-            "CONFIG_PACKAGE_libsodium"
-            "CONFIG_PACKAGE_libudns"
-            "CONFIG_PACKAGE_kmod-inet-diag"
-            "CONFIG_PACKAGE_kmod-netlink-diag"
-            "CONFIG_PACKAGE_coreutils"
-            "CONFIG_PACKAGE_coreutils-base64"
-            "CONFIG_PACKAGE_coreutils-nohup"
-            "CONFIG_PACKAGE_libuci-lua"
-            "CONFIG_PACKAGE_tcping"
-            "CONFIG_PACKAGE_geoview"
-            "CONFIG_PACKAGE_v2ray-geoip"
-            "CONFIG_PACKAGE_v2ray-geosite"
-            "CONFIG_PACKAGE_xray-core"
-            "CONFIG_PACKAGE_sing-box"
-          )
-
-          OPTIONAL_Y=(
-            "CONFIG_PACKAGE_luci-theme-argon"
+            "CONFIG_TARGET_ROOTFS_PARTSIZE=1024"
+            "CONFIG_PACKAGE_luci=y"
+            "CONFIG_PACKAGE_luci-ssl=y"
+            "CONFIG_PACKAGE_luci-compat=y"
+            "CONFIG_PACKAGE_dnsmasq-full=y"
+            "CONFIG_PACKAGE_iptables-nft=y"
+            "CONFIG_PACKAGE_kmod-nft-tproxy=y"
+            "CONFIG_PACKAGE_kmod-nft-socket=y"
+            "CONFIG_PACKAGE_kmod-nft-compat=y"
+            "CONFIG_PACKAGE_kmod-tun=y"
+            "CONFIG_PACKAGE_libev=y"
+            "CONFIG_PACKAGE_libsodium=y"
+            "CONFIG_PACKAGE_libudns=y"
+            "CONFIG_PACKAGE_kmod-inet-diag=y"
+            "CONFIG_PACKAGE_kmod-netlink-diag=y"
+            "CONFIG_PACKAGE_coreutils=y"
+            "CONFIG_PACKAGE_coreutils-base64=y"
+            "CONFIG_PACKAGE_coreutils-nohup=y"
+            "CONFIG_PACKAGE_libuci-lua=y"
+            "CONFIG_PACKAGE_tcping=y"
+            "CONFIG_PACKAGE_geoview=y"
+            "CONFIG_PACKAGE_v2ray-geoip=y"
+            "CONFIG_PACKAGE_v2ray-geosite=y"
           )
 
           missing=0
-          for k in "${MUST_Y[@]}"; do
-            if grep -qE "^${k}=y$" .config; then
-              echo "OK: ${k}=y" | tee -a build.log
+          for line in "${MUST_Y[@]}"; do
+            if grep -qF "$line" .config; then
+              echo "OK: $line" | tee -a build.log
             else
-              echo "MISSING: ${k}=y" | tee -a build.log
+              echo "MISSING: $line" | tee -a build.log
               missing=1
             fi
           done
 
-          for k in "${OPTIONAL_Y[@]}"; do
-            if grep -qE "^${k}=y$" .config; then
-              echo "OK: ${k}=y (optional)" | tee -a build.log
-            else
-              echo "NOTE: ${k} is not enabled (optional)" | tee -a build.log
-            fi
-          done
-
           if [[ "$missing" -ne 0 ]]; then
-            echo "ERROR: One or more required packages are not enabled in final .config." | tee -a build.log
+            echo "ERROR: One or more required config lines are missing in final .config." | tee -a build.log
             exit 1
           fi
+
+          # Optional checks (do not fail)
+          grep -qE '^CONFIG_PACKAGE_luci-theme-argon=y$' .config \
+            && echo "OK: CONFIG_PACKAGE_luci-theme-argon=y (included)" | tee -a build.log \
+            || echo "NOTE: luci-theme-argon not enabled (optional)" | tee -a build.log
 
       - name: Download sources
         shell: bash
@@ -242,17 +242,19 @@ jobs:
             Base: OpenWrt 24.10.5 (x86_64)
             Profile: Clean Edition
 
-            Notes:
-            - Argon theme is included but the default UI remains Bootstrap (stock-like).
-            - This build is Passwall2-ready for offline environments:
-              includes tcping/geoview/v2ray-geoip/v2ray-geosite and common runtime deps.
-              Users can upload luci-app-passwall2.ipk locally without relying on remote opkg feeds.
+            UI:
+            - Default theme: Bootstrap (stock-like)
+            - Argon theme: included as an option (switchable)
 
-            Recommended:
+            Proxy-ready (offline-friendly Passwall2 UI install):
+            - Built-in deps so local upload of luci-app-passwall2.ipk does not complain about:
+              tcping / geoview / v2ray-geoip / v2ray-geosite
+
+            Recommended images:
             - squashfs-uefi for UEFI systems
             - squashfs-bios for legacy BIOS systems
 
-            Default:
+            Defaults:
             - Hostname: HarryWrt
             - Timezone: Asia/Hong_Kong
 
@@ -260,7 +262,7 @@ jobs:
             - 1024MB (1GB)
 
             Integrity:
-            - SHA256SUMS is attached to this release
+            - SHA256SUMS attached
           files: |
             openwrt/bin/targets/x86/64/HarryWrt-${{ env.OWRT_BASE }}-${{ env.PROFILE }}-${{ steps.meta.outputs.release }}-${{ env.TARGET }}-*.img.gz
             openwrt/bin/targets/x86/64/SHA256SUMS
