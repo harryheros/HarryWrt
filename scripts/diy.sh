@@ -3,16 +3,48 @@ set -euo pipefail
 
 # ============================================================
 # HarryWrt DIY Script (OpenWrt 24.10.5 / Clean)
+# - Fix geoview build: allow Go toolchain auto-download (Go >= 1.24)
 # - Branding (banner/motd/DISTRIB_DESCRIPTION)
-# - Force LuCI default theme to Bootstrap (Argon remains optional)
-# - Passwall2 fw4 reload fix (auto restart firewall+passwall2 on iface ifup)
+# - Force LuCI default theme to Bootstrap (Argon optional)
 # ============================================================
 
 FILES_DIR="files"
+mkdir -p "${FILES_DIR}/etc/config" "${FILES_DIR}/etc/uci-defaults"
 
-mkdir -p "${FILES_DIR}/etc/config"
-mkdir -p "${FILES_DIR}/etc/uci-defaults"
-mkdir -p "${FILES_DIR}/etc/hotplug.d/iface"
+# ------------------------------------------------------------
+# 0) Build-time fix: geoview requires Go >= 1.24
+#    OpenWrt 24.10.x ships Go 1.23.x and locks GOTOOLCHAIN=local
+#    Patch to auto so Go can fetch the needed toolchain.
+# ------------------------------------------------------------
+echo "[patch] enabling Go toolchain auto-download (GOTOOLCHAIN=auto)..."
+
+# Patch golang-package.mk (THIS is usually the real source of GOTOOLCHAIN=local)
+GOLANG_PKG_MK="feeds/packages/lang/golang/golang-package.mk"
+if [ -f "$GOLANG_PKG_MK" ]; then
+  # Replace exactly 'GOTOOLCHAIN=local' or 'GOTOOLCHAIN:=local' (with optional spaces)
+  sed -i -E 's/(GOTOOLCHAIN\s*[:]?=)\s*local/\1auto/g' "$GOLANG_PKG_MK"
+fi
+
+# Patch golang-build.sh too (extra safety)
+GOLANG_BUILD_SH="feeds/packages/lang/golang/golang-build.sh"
+if [ -f "$GOLANG_BUILD_SH" ]; then
+  sed -i -E 's/(GOTOOLCHAIN\s*[:]?=)\s*local/\1auto/g' "$GOLANG_BUILD_SH"
+fi
+
+# Last-resort: patch any other files under golang dir that may hardcode it
+if [ -d "feeds/packages/lang/golang" ]; then
+  find "feeds/packages/lang/golang" -type f -maxdepth 3 -print0 \
+    | xargs -0 -I{} sed -i -E 's/(GOTOOLCHAIN\s*[:]?=)\s*local/\1auto/g' "{}" || true
+fi
+
+# Sanity check (fail fast if still locked anywhere)
+if grep -RInE 'GOTOOLCHAIN\s*[:]?=\s*local\b' feeds/packages/lang/golang >/dev/null 2>&1; then
+  echo "ERROR: still found GOTOOLCHAIN=local after patch (geoview will fail)" >&2
+  grep -RInE 'GOTOOLCHAIN\s*[:]?=\s*local\b' feeds/packages/lang/golang | head -n 50 >&2 || true
+  exit 1
+fi
+
+echo "[patch] Go toolchain policy patched OK."
 
 # ------------------------------------------------------------
 # 1) System defaults (hostname, timezone)
@@ -46,14 +78,14 @@ cat > "${FILES_DIR}/etc/banner" <<'EOF'
 EOF
 
 # ------------------------------------------------------------
-# 3) MOTD (post-login message)
+# 3) MOTD
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/motd" <<'EOF'
 HarryWrt 24.10.5 - Clean Edition (based on OpenWrt)
 EOF
 
 # ------------------------------------------------------------
-# 4) UCI defaults: Branding + release description
+# 4) Branding
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'EOF'
 #!/bin/sh
@@ -61,18 +93,9 @@ set -eu
 
 DESC="HarryWrt 24.10.5 Clean (based on OpenWrt)"
 
-# Best-effort branding in release files
-if [ -f /etc/openwrt_release ]; then
-  sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='${DESC}'/" /etc/openwrt_release 2>/dev/null || true
-fi
-
-if [ -f /etc/os-release ]; then
-  sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /etc/os-release 2>/dev/null || true
-fi
-
-if [ -f /usr/lib/os-release ]; then
-  sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /usr/lib/os-release 2>/dev/null || true
-fi
+[ -f /etc/openwrt_release ] && sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='${DESC}'/" /etc/openwrt_release 2>/dev/null || true
+[ -f /etc/os-release ] && sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /etc/os-release 2>/dev/null || true
+[ -f /usr/lib/os-release ] && sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"${DESC}\"/" /usr/lib/os-release 2>/dev/null || true
 
 exit 0
 EOF
@@ -80,44 +103,17 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 # ------------------------------------------------------------
 # 5) Force LuCI default theme to Bootstrap (stock-like)
-#    Use 99 to ensure it runs late (after other uci-defaults)
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/99-force-default-theme" <<'EOF'
 #!/bin/sh
 set -eu
 
-if command -v uci >/dev/null 2>&1; then
-  uci -q set luci.main.mediaurlbase='/luci-static/bootstrap' || true
-  uci -q commit luci || true
-fi
+command -v uci >/dev/null 2>&1 || exit 0
+uci -q set luci.main.mediaurlbase='/luci-static/bootstrap' || true
+uci -q commit luci || true
 
 exit 0
 EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/99-force-default-theme"
-
-# ------------------------------------------------------------
-# 6) Fix Passwall2 fw4 reload issue (auto-restart on iface ifup)
-#    Avoids "Core not running until reboot" confusion.
-# ------------------------------------------------------------
-cat > "${FILES_DIR}/etc/hotplug.d/iface/99-passwall2-fix-fw4" <<'EOF'
-#!/bin/sh
-# HarryWrt: Fix Passwall2 not applying fw4 rules after restart/reset
-# Trigger: interface comes up (ifup)
-# Action: restart firewall + passwall2 if installed
-
-[ "$ACTION" = "ifup" ] || exit 0
-
-# only run if passwall2 exists
-[ -x /etc/init.d/passwall2 ] || exit 0
-
-logger -t harrywrt "iface ifup detected, restarting firewall + passwall2 for fw4 compatibility..."
-
-(/etc/init.d/firewall restart >/dev/null 2>&1 || true) &
-sleep 1
-(/etc/init.d/passwall2 restart >/dev/null 2>&1 || true) &
-
-exit 0
-EOF
-chmod 0755 "${FILES_DIR}/etc/hotplug.d/iface/99-passwall2-fix-fw4"
 
 echo "DIY script executed successfully."
