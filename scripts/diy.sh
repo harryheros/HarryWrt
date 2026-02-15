@@ -182,13 +182,10 @@ EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/98-firstboot-apply-kick"
 
 # ------------------------------------------------------------
-# 8) Final Config Lock (Ensures survivors in .config)
+# 8) Force-lock compatibility packages (Ensures survivors)
 # ------------------------------------------------------------
-{
-  echo "CONFIG_PACKAGE_iptables=y"
-  echo "CONFIG_PACKAGE_ip6tables=y"
-  echo "CONFIG_PACKAGE_kmodloader=y"
-  echo "CONFIG_PACKAGE_procps-ng-ps=y"
-} >> .config
+echo "CONFIG_PACKAGE_iptables=y" >> .config
+echo "CONFIG_PACKAGE_ip6tables=y" >> .config
+echo "CONFIG_PACKAGE_procps-ng-ps=y" >> .config
 
 echo "DIY script executed successfully."
