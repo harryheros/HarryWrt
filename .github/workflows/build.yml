@@ -86,12 +86,12 @@ jobs:
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
-      - name: Add Passwall packages feed (for offline Passwall2 deps)
+      - name: Add extra feeds (compat packages)
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
-          # Provide tcping/geoview/v2ray-geoip/v2ray-geosite as buildable packages
+          # Extra packages feed used to build some optional/third-party components offline (no runtime requirement)
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
 
       - name: Add extra packages (Argon theme sources)
@@ -100,7 +100,6 @@ jobs:
           set -euo pipefail
           cd openwrt
 
-          # Argon theme source into buildroot
           mkdir -p package/extra
           rm -rf package/extra/luci-theme-argon || true
           git clone --depth=1 https://github.com/jerrykuku/luci-theme-argon.git package/extra/luci-theme-argon 2>&1 | tee -a build.log
@@ -131,10 +130,13 @@ jobs:
           MUST_Y=(
             "CONFIG_PACKAGE_dnsmasq-full"
             "CONFIG_PACKAGE_iptables-nft"
+            "CONFIG_PACKAGE_iptables"
+            "CONFIG_PACKAGE_ip6tables"
             "CONFIG_PACKAGE_kmod-nft-tproxy"
             "CONFIG_PACKAGE_kmod-nft-socket"
             "CONFIG_PACKAGE_kmod-nft-compat"
             "CONFIG_PACKAGE_kmod-tun"
+            "CONFIG_PACKAGE_kmodloader"
             "CONFIG_PACKAGE_libev"
             "CONFIG_PACKAGE_libsodium"
             "CONFIG_PACKAGE_libudns"
@@ -144,6 +146,7 @@ jobs:
             "CONFIG_PACKAGE_coreutils-base64"
             "CONFIG_PACKAGE_coreutils-nohup"
             "CONFIG_PACKAGE_libuci-lua"
+            "CONFIG_PACKAGE_procps-ng-ps"
             "CONFIG_PACKAGE_tcping"
             "CONFIG_PACKAGE_geoview"
             "CONFIG_PACKAGE_v2ray-geoip"
@@ -244,9 +247,7 @@ jobs:
 
             Notes:
             - Argon theme is included but the default UI remains Bootstrap (stock-like).
-            - This build is Passwall2-ready for offline environments:
-              includes tcping/geoview/v2ray-geoip/v2ray-geosite and common runtime deps.
-              Users can upload luci-app-passwall2.ipk locally without relying on remote opkg feeds.
+            - Built with a stable, minimal baseline and a compatibility-friendly package set for offline/limited environments.
 
             Recommended:
             - squashfs-uefi for UEFI systems
