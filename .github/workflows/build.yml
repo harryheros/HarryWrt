@@ -124,13 +124,23 @@ jobs:
           # 1) First defconfig
           make defconfig 2>&1 | tee -a build.log
 
-          # 2) Defense-grade "補票" (official OpenWrt way)
-          ./scripts/config set PACKAGE_iptables
-          ./scripts/config set PACKAGE_ip6tables
-          ./scripts/config set PACKAGE_procps-ng-ps
-          ./scripts/config set PACKAGE_kmodloader
+          # 2) Defense-grade ensure: set critical options via Kconfig conf (avoid format issues)
+          CONF="./scripts/config/conf"
+          if [[ ! -x "$CONF" ]]; then
+            echo "ERROR: $CONF not found/executable" | tee -a build.log
+            ls -lah ./scripts/config | tee -a build.log || true
+            exit 1
+          fi
 
-          # 3) Second defconfig to resolve dependencies
+          # Remove CRLF just in case (prevents 'missing separator')
+          sed -i 's/\r$//' .config
+
+          "$CONF" --file .config --set-val CONFIG_PACKAGE_iptables y
+          "$CONF" --file .config --set-val CONFIG_PACKAGE_ip6tables y
+          "$CONF" --file .config --set-val CONFIG_PACKAGE_procps-ng-ps y
+          "$CONF" --file .config --set-val CONFIG_PACKAGE_kmodloader y
+
+          # 3) Final defconfig (lets Kconfig settle deps)
           make defconfig 2>&1 | tee -a build.log
 
           echo "Checking important packages in final .config..." | tee -a build.log
@@ -255,8 +265,8 @@ jobs:
 
             Notes:
             - Argon theme is included but the default UI remains Bootstrap (stock-like).
-            - Offline-ready base: includes common runtime deps and engines.
-              Users can upload extra .ipk locally without relying on remote feeds.
+            - This build is offline-ready for popular LuCI apps:
+              includes geodata/tcping/common runtime deps and proxy engines (xray/sing-box).
 
             Recommended:
             - squashfs-uefi for UEFI systems
