@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: "Release version (e.g. v1.0)"
+        description: "Release version"
         required: true
         default: "v1.0"
   push:
@@ -31,26 +31,17 @@ jobs:
 
       - name: Determine release version
         id: meta
-        shell: bash
         run: |
-          set -euo pipefail
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            rel="${{ github.event.inputs.release_version }}"
+            echo "release=${{ github.event.inputs.release_version }}" >> "$GITHUB_OUTPUT"
           else
-            tag="${GITHUB_REF##*/}"
-            rel="$(echo "$tag" | grep -oE 'v[0-9]+(\.[0-9]+){0,2}' || true)"
-            [[ -n "$rel" ]] || rel="v1.0"
+            echo "release=${GITHUB_REF##*/}" >> "$GITHUB_OUTPUT"
           fi
-          echo "release=$rel" >> "$GITHUB_OUTPUT"
 
-      - name: Free disk space and enable swap
+      - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc || true
-          SWAP_PATH="/mnt/gh-swapfile"
-          sudo fallocate -l 8G "$SWAP_PATH" || sudo dd if=/dev/zero of="$SWAP_PATH" bs=1M count=8192
-          sudo chmod 600 "$SWAP_PATH"
-          sudo mkswap "$SWAP_PATH"
-          sudo swapon "$SWAP_PATH"
+          df -h
 
       - name: Install build dependencies
         run: |
@@ -59,9 +50,7 @@ jobs:
             gettext git libncurses-dev libssl-dev rsync unzip zlib1g-dev file wget curl python3-pyelftools
 
       - name: Clone OpenWrt source
-        run: |
-          git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
-          touch openwrt/build.log
+        run: git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
 
       - name: Update and install feeds
         run: |
@@ -81,13 +70,20 @@ jobs:
           chmod +x "${GITHUB_WORKSPACE}/scripts/diy.sh"
           bash "${GITHUB_WORKSPACE}/scripts/diy.sh"
           
-          # 關鍵修正：在 defconfig 抹除配置後再次強行寫入
-          make defconfig
-          echo "CONFIG_PACKAGE_iptables=y" >> .config
-          echo "CONFIG_PACKAGE_ip6tables=y" >> .config
-          echo "CONFIG_PACKAGE_procps-ng-ps=y" >> .config
+          # 1. 執行 defconfig 讓系統完成基本的依賴樹構建
           make defconfig
 
+          # 2. 【核心強效鎖定】使用 sed 強行把被系統「優化掉」的兼容包改回 y
+          sed -i 's/# CONFIG_PACKAGE_iptables is not set/CONFIG_PACKAGE_iptables=y/g' .config
+          sed -i 's/# CONFIG_PACKAGE_ip6tables is not set/CONFIG_PACKAGE_ip6tables=y/g' .config
+          sed -i 's/# CONFIG_PACKAGE_procps-ng-ps is not set/CONFIG_PACKAGE_procps-ng-ps=y/g' .config
+          
+          # 3. 兜底方案：如果連註釋都沒有，則直接追加
+          grep -q "^CONFIG_PACKAGE_iptables=y" .config || echo "CONFIG_PACKAGE_iptables=y" >> .config
+          grep -q "^CONFIG_PACKAGE_ip6tables=y" .config || echo "CONFIG_PACKAGE_ip6tables=y" >> .config
+          grep -q "^CONFIG_PACKAGE_procps-ng-ps=y" .config || echo "CONFIG_PACKAGE_procps-ng-ps=y" >> .config
+
+          # 4. 進行質檢 (注意：此後絕不再跑 make defconfig，防止被再次剔除)
           echo "Checking important packages in final .config..."
           MUST_Y=(
             "CONFIG_PACKAGE_dnsmasq-full"
@@ -132,7 +128,7 @@ jobs:
       - name: Build firmware
         run: cd openwrt && make -j"$(nproc)" || make -j1 V=s
 
-      - name: Organize and rename files
+      - name: Organize files
         run: |
           cd openwrt/bin/targets/x86/64
           REL="${{ steps.meta.outputs.release }}"
@@ -140,17 +136,16 @@ jobs:
           cp -f "$(ls -1 *squashfs-combined-efi.img.gz | head -n 1)" "${PREFIX}-uefi.img.gz"
           sha256sum ${PREFIX}-*.img.gz > SHA256SUMS
 
-      - name: Upload firmware artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: HarryWrt-Firmware
           path: openwrt/bin/targets/x86/64/HarryWrt-*.img.gz
 
-      - name: Publish GitHub Release
+      - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          name: HarryWrt ${{ steps.meta.outputs.release }}
           files: |
             openwrt/bin/targets/x86/64/HarryWrt-*.img.gz
             openwrt/bin/targets/x86/64/SHA256SUMS
