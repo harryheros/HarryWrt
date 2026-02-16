@@ -48,20 +48,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo rm -rf \
-            /usr/share/dotnet \
-            /usr/local/lib/android \
-            /opt/ghc \
-            /usr/local/share/powershell \
-            /usr/share/swift \
-            /usr/local/share/boost || true
-          sudo apt-get clean || true
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell || true
           df -h
 
           SWAP_PATH="/mnt/gh-swapfile"
           sudo swapoff "$SWAP_PATH" 2>/dev/null || true
           sudo rm -f "$SWAP_PATH" || true
-          sudo fallocate -l 8G "$SWAP_PATH" 2>/dev/null || sudo dd if=/dev/zero of="$SWAP_PATH" bs=1M count=8192 status=progress
+
+          if ! sudo fallocate -l 8G "$SWAP_PATH" 2>/dev/null; then
+            sudo dd if=/dev/zero of="$SWAP_PATH" bs=1M count=8192 status=progress
+          fi
+
           sudo chmod 600 "$SWAP_PATH"
           sudo mkswap "$SWAP_PATH"
           sudo swapon "$SWAP_PATH"
@@ -89,14 +86,14 @@ jobs:
           git clone --depth=1 --branch "${OWRT_TAG}" "${OWRT_REPO}" openwrt
           : > openwrt/build.log
 
-      - name: Add Passwall packages feed (offline deps)
+      - name: Add Passwall packages feed (for offline deps)
         shell: bash
         run: |
           set -euo pipefail
           cd openwrt
           echo "src-git passwall_packages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> feeds.conf.default
 
-      - name: Add extra packages (Argon theme)
+      - name: Add extra packages (Argon theme sources)
         shell: bash
         run: |
           set -euo pipefail
@@ -121,28 +118,22 @@ jobs:
 
           cp "${GITHUB_WORKSPACE}/configs/x86_64-clean.config" .config
 
-          # Enforce dnsmasq-full selection
-          sed -i '/^CONFIG_PACKAGE_dnsmasq-full=/d' .config
-          sed -i '/^CONFIG_PACKAGE_dnsmasq=/d' .config
-          sed -i '/^# CONFIG_PACKAGE_dnsmasq is not set/d' .config
-          echo "CONFIG_PACKAGE_dnsmasq-full=y" >> .config
-          echo "# CONFIG_PACKAGE_dnsmasq is not set" >> .config
-
           chmod +x "${GITHUB_WORKSPACE}/scripts/diy.sh"
           bash "${GITHUB_WORKSPACE}/scripts/diy.sh" 2>&1 | tee -a build.log
 
           make defconfig 2>&1 | tee -a build.log
 
-          # Defensive keepers after defconfig trim
           EXTRA_PKGS=(
             "CONFIG_PACKAGE_iptables"
             "CONFIG_PACKAGE_ip6tables"
+            "CONFIG_PACKAGE_procps-ng"
             "CONFIG_PACKAGE_procps-ng-ps"
             "CONFIG_PACKAGE_kmodloader"
           )
+
           for pkg in "${EXTRA_PKGS[@]}"; do
-            sed -i "/^${pkg}=.*/d" .config
-            sed -i "/^# ${pkg} is not set/d" .config
+            sed -i "/^${pkg}[= ]/d" .config || true
+            sed -i "/^# ${pkg} is not set$/d" .config || true
             echo "${pkg}=y" >> .config
           done
 
@@ -151,6 +142,11 @@ jobs:
           MUST_Y=(
             "CONFIG_PACKAGE_dnsmasq-full"
             "CONFIG_PACKAGE_iptables-nft"
+            "CONFIG_PACKAGE_iptables"
+            "CONFIG_PACKAGE_ip6tables"
+            "CONFIG_PACKAGE_procps-ng"
+            "CONFIG_PACKAGE_procps-ng-ps"
+            "CONFIG_PACKAGE_kmodloader"
             "CONFIG_PACKAGE_kmod-nft-tproxy"
             "CONFIG_PACKAGE_kmod-nft-socket"
             "CONFIG_PACKAGE_kmod-nft-compat"
@@ -170,10 +166,6 @@ jobs:
             "CONFIG_PACKAGE_v2ray-geosite"
             "CONFIG_PACKAGE_xray-core"
             "CONFIG_PACKAGE_sing-box"
-            "CONFIG_PACKAGE_iptables"
-            "CONFIG_PACKAGE_ip6tables"
-            "CONFIG_PACKAGE_procps-ng-ps"
-            "CONFIG_PACKAGE_kmodloader"
           )
 
           OPTIONAL_Y=(
@@ -268,7 +260,7 @@ jobs:
 
             Notes:
             - Argon theme is included but the default UI remains Bootstrap (stock-like).
-            - Offline-ready runtime environment includes common engines and GeoData packages.
+            - Offline-ready base includes common runtime deps and engines.
 
             Recommended:
             - squashfs-uefi for UEFI systems
