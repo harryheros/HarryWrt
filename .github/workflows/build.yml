@@ -237,34 +237,21 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+
           cd openwrt/bin/targets/x86/64
 
           REL="${{ steps.meta.outputs.release }}"
           PREFIX="HarryWrt-${{ env.OWRT_BASE }}-${{ env.PROFILE }}-${REL}-${{ env.TARGET }}"
           TAG="${GITHUB_REF##*/}"
 
-          cp ../../EL="../../build.log"
-          cp "$REL" ./build.log
+          cp ../../build.log ./build.log
 
-          ASSETS=(
-            "${PREFIX}-squashfs-bios.img.gz"
-            "${PREFIX}-squashfs-uefi.img.gz"
-            "${PREFIX}-ext4-bios.img.gz"
-            "${PREFIX}-ext4-uefi.img.gz"
-            "SHA256SUMS"
-            "build.log"
-          )
-
-          echo "Creating release for tag: ${TAG}"
-
-          gh release view "${TAG}" >/dev/null 2>&1 || \
-            gh release create "${TAG}" \
-              --title "HarryWrt Clean 24.10.5 ${REL} - x86_64" \
-              --notes "Base: OpenWrt 24.10.5 (x86_64)
+          cat > release_notes.txt <<EOF
+Base: OpenWrt 24.10.5 (x86_64)
 Profile: Clean Edition
 
 Notes:
-- Argon theme is included but default UI remains Bootstrap (stock-like).
+- Argon theme is included but the default UI remains Bootstrap (stock-like).
 - Passwall2-ready offline base includes tcping/geoview/v2ray-geoip/v2ray-geosite and common runtime deps.
 
 Recommended:
@@ -279,16 +266,29 @@ Rootfs:
 - 1024MB (1GB)
 
 Integrity:
-- SHA256SUMS included"
+- SHA256SUMS included
+EOF
 
-          echo "Uploading assets..."
+          ASSETS=(
+            "${PREFIX}-squashfs-bios.img.gz"
+            "${PREFIX}-squashfs-uefi.img.gz"
+            "${PREFIX}-ext4-bios.img.gz"
+            "${PREFIX}-ext4-uefi.img.gz"
+            "SHA256SUMS"
+            "build.log"
+          )
+
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release create "${TAG}" \
+              --title "HarryWrt Clean 24.10.5 ${REL} - x86_64" \
+              --notes-file release_notes.txt
+          fi
+
           for f in "${ASSETS[@]}"; do
             if [ -f "$f" ]; then
               echo "Uploading: $f"
-              gh release upload "${TAG}" "$f" --clobber || true
+              gh release upload "${TAG}" "$f" --clobber
             else
               echo "Missing asset: $f"
             fi
           done
-
-          echo "Release upload completed."
