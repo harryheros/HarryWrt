@@ -48,7 +48,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/powershell || true
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /usr/local/share/powershell \
+            /usr/share/swift \
+            /usr/local/share/boost \
+            || true
+          sudo apt-get clean || true
           df -h
 
           SWAP_PATH="/mnt/gh-swapfile"
@@ -244,30 +252,34 @@ jobs:
           PREFIX="HarryWrt-${{ env.OWRT_BASE }}-${{ env.PROFILE }}-${REL}-${{ env.TARGET }}"
           TAG="${GITHUB_REF##*/}"
 
-          cp ../../build.log ./build.log
+          if [ -f ../../../../build.log ]; then
+            cp -f ../../../../build.log ./build.log
+          else
+            echo "WARNING: build.log not found at ../../../../build.log"
+          fi
 
-          cat > release_notes.txt <<EOF
-Base: OpenWrt 24.10.5 (x86_64)
-Profile: Clean Edition
-
-Notes:
-- Argon theme is included but the default UI remains Bootstrap (stock-like).
-- Passwall2-ready offline base includes tcping/geoview/v2ray-geoip/v2ray-geosite and common runtime deps.
-
-Recommended:
-- squashfs-uefi for UEFI systems
-- squashfs-bios for legacy BIOS systems
-
-Default:
-- Hostname: HarryWrt
-- Timezone: Asia/Hong_Kong
-
-Rootfs:
-- 1024MB (1GB)
-
-Integrity:
-- SHA256SUMS included
-EOF
+          printf '%s\n' \
+            "Base: OpenWrt 24.10.5 (x86_64)" \
+            "Profile: Clean Edition" \
+            "" \
+            "Notes:" \
+            "- Argon theme is included but the default UI remains Bootstrap (stock-like)." \
+            "- Passwall2-ready offline base includes tcping/geoview/v2ray-geoip/v2ray-geosite and common runtime deps." \
+            "" \
+            "Recommended:" \
+            "- squashfs-uefi for UEFI systems" \
+            "- squashfs-bios for legacy BIOS systems" \
+            "" \
+            "Default:" \
+            "- Hostname: HarryWrt" \
+            "- Timezone: Asia/Hong_Kong" \
+            "" \
+            "Rootfs:" \
+            "- 1024MB (1GB)" \
+            "" \
+            "Integrity:" \
+            "- SHA256SUMS included" \
+            > release_notes.txt
 
           ASSETS=(
             "${PREFIX}-squashfs-bios.img.gz"
@@ -289,6 +301,6 @@ EOF
               echo "Uploading: $f"
               gh release upload "${TAG}" "$f" --clobber
             else
-              echo "Missing asset: $f"
+              echo "Skipping missing asset: $f"
             fi
           done
