@@ -251,25 +251,25 @@ jobs:
             cp -f "../../../../build.log" ./build.log
           fi
 
-          cat > release_notes.txt <<'EOF'
-Base: OpenWrt 24.10.5 (x86_64)
-Profile: Clean Edition
-
-Notes:
-- Argon theme is included but the default UI remains Bootstrap.
-- This build is offline-ready for third-party packages.
-
-Recommended:
-- squashfs-uefi for UEFI systems
-- squashfs-bios for legacy BIOS systems
-
-Default:
-- Hostname: HarryWrt
-- Timezone: Asia/Hong_Kong
-
-Integrity:
-- SHA256SUMS included
-EOF
+          printf '%s\n' \
+            "Base: OpenWrt 24.10.5 (x86_64)" \
+            "Profile: Clean Edition" \
+            "" \
+            "Notes:" \
+            "- Argon theme is included but the default UI remains Bootstrap." \
+            "- This build is offline-ready for third-party packages." \
+            "" \
+            "Recommended:" \
+            "- squashfs-uefi for UEFI systems" \
+            "- squashfs-bios for legacy BIOS systems" \
+            "" \
+            "Default:" \
+            "- Hostname: HarryWrt" \
+            "- Timezone: Asia/Hong_Kong" \
+            "" \
+            "Integrity:" \
+            "- SHA256SUMS included" \
+            > release_notes.txt
 
           ASSETS=(
             "${PREFIX}-squashfs-bios.img.gz"
