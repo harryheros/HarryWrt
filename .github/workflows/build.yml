@@ -368,14 +368,11 @@ jobs:
             FEATURES=$(printf '%s\n' \
               "- Argon theme included (default: Bootstrap)" \
               "- Passwall2 offline-ready dependencies" \
-              "- HTTPS DNS Proxy (optional DoH via Cloudflare / Quad9, disabled by default)" \
+              "- AdGuard Home (friendly encrypted DNS / DoH, disabled by default, safe enable flow)" \
               "- WireGuard VPN (wireguard-tools + luci-app-wireguard)" \
               "- DDNS (Cloudflare + No-IP scripts)" \
               "- UPnP / NAT-PMP (miniupnpd-nftables, disabled by default)" \
-              "- Threat blocking (banip + luci-app-banip)" \
               "- Traffic monitoring (nlbwmon)" \
-              "- System statistics (collectd + luci-app-statistics)" \
-              "- Multi-WAN load balancing (mwan3)" \
               "- Wake-on-LAN" \
               "- IPv6 support (odhcp6c + odhcpd)")
           else
@@ -421,11 +418,19 @@ jobs:
             > release_notes.txt
 
           # Create release if it doesn't exist (first matrix job to finish creates it)
+          # Use --clobber-safe approach: attempt create and ignore "already exists" error
           if ! gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
             gh release create "${TAG}" \
               --repo "${REPO}" \
               --title "HarryWrt ${REL}" \
-              --notes-file release_notes.txt
+              --notes-file release_notes.txt || {
+              # Another parallel job may have created it first — verify it now exists
+              if ! gh release view "${TAG}" --repo "${REPO}" >/dev/null 2>&1; then
+                echo "ERROR: Failed to create or find release ${TAG}" >&2
+                exit 1
+              fi
+              echo "Release already created by another job, continuing..."
+            }
           fi
 
           echo "Uploading assets for ${OWRT_BASE} / ${TARGET}..."

@@ -21,16 +21,13 @@ Minimal base system for users who want full control over what runs on their rout
 - Modern firewall stack (nftables / fw4)
 
 ### Plus Edition
-Full-featured primary router firmware. Everything in Clean, plus:
+Stable enhanced firmware. Everything in Clean, plus pre-installed tools that stay inert until explicitly enabled:
 
-- HTTPS DNS Proxy — optional DoH support via Cloudflare / Quad9, disabled by default, enable via LuCI Services → HTTPS DNS Proxy
+- AdGuard Home — user-friendly encrypted DNS / DoH and DNS filtering, disabled by default; enable safely with `harrywrt-feature-manager enable adguard`
 - WireGuard VPN — kernel module + LuCI UI + QR code export
 - DDNS — Cloudflare and No-IP scripts with LuCI management
-- UPnP / NAT-PMP — miniupnpd-nftables, disabled by default, enable via LuCI
-- Threat blocking — banip with LuCI management
+- UPnP / NAT-PMP — miniupnpd-nftables, disabled by default; enable with `harrywrt-feature-manager enable upnp`
 - Traffic monitoring — nlbwmon per-device bandwidth tracking
-- System statistics — collectd + LuCI graphs (CPU, memory, interface)
-- Multi-WAN load balancing — mwan3 with LuCI management
 - Wake-on-LAN
 - Network diagnostics — mtr-json
 
@@ -62,7 +59,7 @@ Full-featured primary router firmware. Everything in Clean, plus:
 
 **Clean** — If you want full control, plan to install only what you need, or are deploying in a server/VM environment where minimal footprint matters.
 
-**Plus** — If you are migrating from pfSense/OPNsense or want a primary home router with DDNS, VPN, ad blocking, and traffic monitoring ready to configure out of the box.
+**Plus** — If you are migrating from pfSense/OPNsense or want a primary home router with DDNS, VPN, AdGuard Home DNS, and traffic monitoring ready to configure out of the box.
 
 ### Which OpenWrt version should I choose?
 
@@ -123,14 +120,11 @@ Pre-installed dependencies: xray-core, sing-box, geoview, v2ray-geoip, v2ray-geo
 
 | Component | Package(s) | Notes |
 |-----------|-----------|-------|
-| HTTPS DNS Proxy | https-dns-proxy | Optional DoH support; disabled by default; pre-configured with Cloudflare and Quad9; enable via LuCI |
+| AdGuard Home | adguardhome | Friendly encrypted DNS / DoH and DNS filtering; disabled by default; safe enable/rollback via feature manager |
 | WireGuard VPN | kmod-wireguard, wireguard-tools, luci-app-wireguard, qrencode | QR code peer export supported |
 | DDNS | ddns-scripts, luci-app-ddns, ddns-scripts-cloudflare, ddns-scripts-noip | Disabled by default |
-| UPnP / NAT-PMP | miniupnpd-nftables, luci-app-upnp | Disabled by default; enable via LuCI |
-| Threat blocking | banip, luci-app-banip | Disabled by default |
-| Traffic monitoring | nlbwmon, luci-app-nlbwmon | |
-| System statistics | collectd, luci-app-statistics | CPU, memory, interface graphs |
-| Multi-WAN | mwan3, luci-app-mwan3 | |
+| UPnP / NAT-PMP | miniupnpd-nftables, luci-app-upnp | Disabled by default; enable via feature manager |
+| Traffic monitoring | nlbwmon, luci-app-nlbwmon | Per-device bandwidth tracking |
 | Wake-on-LAN | etherwake, luci-app-wol | |
 | Network diagnostics | mtr-json | |
 
@@ -155,21 +149,60 @@ Set a password on first login before further configuration.
 
 > Browser SSL warnings are expected (self-signed certificate).
 
-### HTTPS DNS Proxy (Plus only)
 
-HTTPS DNS Proxy provides optional DNS-over-HTTPS (DoH) support. It is **disabled by default** — enable it via **LuCI → Services → HTTPS DNS Proxy**.
+### HarryWrt Feature Manager
 
-Pre-configured upstream servers:
-- Cloudflare: `https://1.1.1.1/dns-query`
-- Quad9: `https://dns.quad9.net/dns-query`
+Plus Edition keeps network-takeover features disabled by default. Use the feature manager to enable them with service restart, DNS health check, and rollback:
 
-> For users who want ad blocking and advanced DNS filtering, install AdGuard Home manually:
-> ```sh
-> # OpenWrt 25.12
-> apk update && apk add adguardhome
-> # OpenWrt 24.10
-> opkg update && opkg install adguardhome
-> ```
+```sh
+harrywrt-feature-manager status all
+harrywrt-feature-manager enable adguard
+harrywrt-feature-manager disable adguard
+harrywrt-feature-manager enable upnp
+```
+
+`enable doh` is kept as an alias for `enable adguard`:
+
+```sh
+harrywrt-feature-manager enable doh
+```
+
+### AdGuard Home DoH (Plus only)
+
+AdGuard Home is the recommended DoH path for HarryWrt Plus. It provides a friendly web UI, encrypted upstream DNS, cache, query log, and DNS filtering. It is installed but **disabled by default** so the first boot remains as stable as Clean Edition.
+
+When enabled, HarryWrt will:
+
+1. back up `/etc/config/dhcp`;
+2. move dnsmasq from port 53 to port 5353;
+3. start AdGuard Home on port 53;
+4. use Cloudflare and Quad9 DoH as default upstreams;
+5. run a DNS health check;
+6. roll back automatically if DNS fails.
+
+After enabling, open:
+
+```text
+http://router.lan:3000
+http://192.168.1.1:3000
+```
+
+Default upstreams:
+
+- `https://1.1.1.1/dns-query`
+- `https://9.9.9.9/dns-query`
+
+### Removed from Plus mainline
+
+The following components are intentionally no longer included in Plus because they frequently modify routing, firewall rules, or background service state and are better suited for a separate Full/Lab profile:
+
+- `https-dns-proxy`
+- `mwan3`
+- `banip`
+- `collectd` / `luci-app-statistics`
+- `harrywrt_guardian`
+
+Plus should be a daily-use firmware: more convenient than Clean, but not more fragile.
 
 ---
 
@@ -189,16 +222,23 @@ All required dependencies (xray-core, sing-box, geoview, v2ray-geoip, v2ray-geos
 2. In LuCI: System → Software → Upload Package → select the `.apk` file → Install
 3. Refresh browser, Passwall2 appears under Services menu
 
-> **Note:** HarryWrt 25.12.4 has been patched to allow local package uploads without signature errors. The install experience is identical to 24.10.6 — upload and install, no SSH or command line needed.
+> **Note:** HarryWrt 25.12.4 includes a patched LuCI package manager that allows local `.apk` uploads without signature verification errors. The install experience is identical to 24.10.6 — upload and install directly from the web UI, no SSH required.
 
 > **Important:** On 25.12.4, make sure to download the `.apk` format (not `.ipk`). The `.ipk` format is only compatible with 24.10.x.
 
-### For users in mainland China
+### Mirror auto-detection
 
-If you are unable to access the OpenWrt package repository, switch to a mirror first:
+HarryWrt includes a built-in mirror auto-detection helper (`harrywrt-mirror-check`). On first boot, and on every package list update on 25.12.4, HarryWrt tests connectivity to `downloads.openwrt.org`. If the official server is unreachable, it automatically switches the repository configuration to the TUNA mirror (`mirrors.tuna.tsinghua.edu.cn/openwrt`) and restores the official server when it becomes reachable again.
+
+This runs transparently; no manual configuration is needed.
+
+If you need to switch manually:
 
 ```sh
-# OpenWrt 25.12 (apk)
+# Run the helper directly (both versions)
+/usr/bin/harrywrt-mirror-check
+
+# Or set manually — OpenWrt 25.12 (apk)
 sed -i 's_downloads.openwrt.org_mirrors.tuna.tsinghua.edu.cn/openwrt_g' /etc/apk/repositories.d/distfeeds.list
 
 # OpenWrt 24.10 (opkg)
@@ -257,13 +297,14 @@ All modifications and distributed binaries comply with upstream OpenWrt licensin
 - LuCI Project
 - Argon Theme (jerrykuku)
 - Passwall2 (Openwrt-Passwall Organization)
-- https-dns-proxy (openwrt)
+- AdGuard Home
 
 ---
 
 ## Author
 
 Maintained by: harryheros
+
 ---
 
 Part of the [Nova infrastructure toolkit](https://github.com/harryheros).

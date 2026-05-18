@@ -12,11 +12,10 @@ set -euo pipefail
 # - Default LuCI theme forced to Bootstrap
 # - Go toolchain GOTOOLCHAIN=auto patch (for geoview)
 # - First boot: musl loader symlink fix (arch-aware)
-# - First boot: passwall2 guardian service
-# - First boot: clean non-existent passwall_packages feed
+# # - First boot: clean non-existent passwall_packages feed
 # - First boot: patch LuCI package manager (apk trust + mirror auto-detect)
 # - NTP configuration preserved
-# - [plus only] HTTPS DNS Proxy pre-configured (disabled by default)
+# - [plus only] AdGuard Home pre-installed, disabled by default, safe enable flow
 # - [plus only] UPnP disabled by default
 # =============================================================
 
@@ -33,6 +32,7 @@ fi
 FILES_DIR="files"
 mkdir -p "${FILES_DIR}/etc/config"
 mkdir -p "${FILES_DIR}/etc/uci-defaults"
+mkdir -p "${FILES_DIR}/usr/libexec"
 
 echo "============================================================"
 echo " HarryWrt DIY: OpenWrt ${HARRYWRT_VER} / ${TARGET} / ${PROFILE}"
@@ -147,7 +147,7 @@ EOF
 # 2) SSH login banner
 # ------------------------------------------------------------
 if [[ "${PROFILE}" == "plus" ]]; then
-  PLUS_BANNER_LINE=" DoH available: Services → HTTPS DNS Proxy (disabled by default)"$'\n'"---------------------------------------------------------------"
+  PLUS_BANNER_LINE=" Plus tools available: use harrywrt-feature-manager to safely enable AdGuard DoH/UPnP"$'\n'"---------------------------------------------------------------"
 else
   PLUS_BANNER_LINE=""
 fi
@@ -246,53 +246,13 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/90-musl-loader-fix"
 fi
 
 # ------------------------------------------------------------
-# 7) First boot: passwall2 guardian (procd service)
+# 7) Guardian removed from Clean/Plus
 #
-#    Passwall2 has its own hotplug (98-passwall2) and init.d
-#    with START=99 + boot delay. The guardian complements this
-#    by handling config.change triggers that passwall2's own
-#    hotplug doesn't cover.
-#
-#    NOTE: We removed the old 98-passwall2-autofix script
-#    because passwall2's own init.d boot() already handles
-#    first-boot with a configurable delay.
+#    The old harrywrt_guardian could silently restart passwall2
+#    after firewall/passwall2 config changes. That kind of hidden
+#    automation is useful only in a lab/full profile, not in daily
+#    Clean/Plus firmware.
 # ------------------------------------------------------------
-cat > "${FILES_DIR}/etc/uci-defaults/95-harrywrt-guardian" <<'EOF'
-#!/bin/sh
-
-# Create the guardian init.d service using printf
-# (avoids nested heredoc issues on BusyBox ash)
-printf '%s\n' \
-  '#!/bin/sh /etc/rc.common' \
-  'START=99' \
-  'USE_PROCD=1' \
-  '' \
-  'service_triggers() {' \
-  '  procd_add_config_trigger "config.change" "firewall" /etc/init.d/harrywrt_guardian restart' \
-  '  procd_add_config_trigger "config.change" "passwall2" /etc/init.d/harrywrt_guardian restart' \
-  '}' \
-  '' \
-  'start_service() {' \
-  '  # Wait for firewall to be fully loaded' \
-  '  local i=0' \
-  '  while [ $i -lt 10 ]; do' \
-  '    nft list ruleset >/dev/null 2>&1 && break' \
-  '    sleep 1' \
-  '    i=$((i+1))' \
-  '  done' \
-  '  [ -x /etc/init.d/passwall2 ] && {' \
-  '    local enabled=$(uci -q get passwall2.@global[0].enabled)' \
-  '    [ "$enabled" = "1" ] && /etc/init.d/passwall2 restart >/dev/null 2>&1 || true' \
-  '  }' \
-  '}' \
-  > /etc/init.d/harrywrt_guardian
-
-chmod 0755 /etc/init.d/harrywrt_guardian
-/etc/init.d/harrywrt_guardian enable >/dev/null 2>&1 || true
-
-exit 0
-EOF
-chmod 0755 "${FILES_DIR}/etc/uci-defaults/95-harrywrt-guardian"
 
 # ------------------------------------------------------------
 # 8) First boot: clean non-existent passwall_packages feed
@@ -328,8 +288,8 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/91-clean-passwall-feed"
 fi
 
 # ------------------------------------------------------------
-# 9) First boot: patch LuCI package manager for local .apk
-#    install (25.12+ only)
+# 9) First boot: replace LuCI package manager for local .apk
+#    install (25.12+ only) and install mirror auto-detect helper
 #
 #    OpenWrt 25.12 switched from opkg to apk (Alpine Package
 #    Keeper). Unlike opkg, apk enforces signature verification
@@ -337,85 +297,241 @@ fi
 #    breaks the "upload .apk → install" workflow that users
 #    expect from 24.10's seamless .ipk experience.
 #
-#    This patch modifies /usr/libexec/package-manager-call to:
-#    1) Add --allow-untrusted --force-non-repository for local
-#       .apk installs (restores 24.10 upload-install behavior)
-#    2) Auto-detect repo mirror on every "update" — if official
-#       server is unreachable (3s timeout), temporarily switch
-#       to TUNA mirror before refreshing. This runs each time,
-#       so it adapts to the user's actual network environment
-#       without modifying config files at first boot.
+#    Strategy: replace /usr/libexec/package-manager-call entirely
+#    with a known-good wrapper rather than patching with sed
+#    (the upstream script is compressed into a few long lines,
+#    making sed append unreliable regardless of pattern accuracy).
+#    The wrapper handles:
+#      1) --allow-untrusted for local .apk file installs
+#      2) mirror auto-detect via harrywrt-mirror-check before update
+#      3) preserves the JSON output format LuCI expects
 # ------------------------------------------------------------
+
+# harrywrt-mirror-check: shared helper used by both 25.12 wrapper and 24.10 uci-default
+mkdir -p "${FILES_DIR}/usr/bin"
+if [[ "${HARRYWRT_VER}" == 25.* ]]; then
+cat > "${FILES_DIR}/usr/bin/harrywrt-mirror-check" <<'EOF'
+#!/bin/sh
+# HarryWrt: auto-detect and switch apk mirror (25.12)
+OFFICIAL="downloads.openwrt.org"
+MIRROR="mirrors.tuna.tsinghua.edu.cn/openwrt"
+if wget -q -O /dev/null --timeout=3 "https://${OFFICIAL}" 2>/dev/null; then
+	for f in /etc/apk/repositories.d/*.list; do
+		[ -f "$f" ] || continue
+		sed -i "s|${MIRROR}|${OFFICIAL}|g" "$f"
+	done
+else
+	for f in /etc/apk/repositories.d/*.list; do
+		[ -f "$f" ] || continue
+		sed -i "s|${OFFICIAL}|${MIRROR}|g" "$f"
+	done
+fi
+EOF
+chmod 0755 "${FILES_DIR}/usr/bin/harrywrt-mirror-check"
+fi
+
 if [[ "${HARRYWRT_VER}" == 25.* ]]; then
 cat > "${FILES_DIR}/etc/uci-defaults/92-patch-package-manager" <<'PATCHEOF'
 #!/bin/sh
+# HarryWrt: replace package-manager-call with a known-good wrapper.
+#
+# Rationale: the upstream script is packed into a small number of long lines,
+# making sed-based patching unreliable regardless of pattern accuracy.
+# We back up the original and overwrite with a full self-contained script that:
+#   1. Allows local .apk installs without signature checks (--allow-untrusted)
+#   2. Runs a mirror connectivity check before every "update"
+#   3. Preserves the JSON output format LuCI expects
+#   4. Remains compatible with both apk (25.12) and opkg (fallback)
+
 PMC="/usr/libexec/package-manager-call"
-[ -f "$PMC" ] || exit 0
+[ -x "$PMC" ] || exit 0
 
 # Only patch once
-grep -q 'allow-untrusted' "$PMC" && exit 0
+grep -q 'harrywrt' "$PMC" && exit 0
 
-# Patch 1: allow local .apk install without signature check
-sed -i '/action="add"/a\\t\t\t\t\tcmd="$cmd --allow-untrusted --force-non-repository"' "$PMC"
+cp -f "$PMC" "$PMC.harrywrt.bak"
 
-# Patch 2: auto-detect mirror on "update" action
-# Insert a mirror check function and hook it into the update path.
-# We add a helper function at the top of the script, then call it
-# before apk update runs.
-sed -i '/^case "\$action" in/i\
-_harrywrt_mirror_check() {\
-  OFFICIAL="downloads.openwrt.org"\
-  MIRROR="mirrors.tuna.tsinghua.edu.cn/openwrt"\
-  # Quick connectivity test (3s timeout)\
-  if wget -q -O /dev/null --timeout=3 "https://${OFFICIAL}" 2>/dev/null; then\
-    # Official reachable — restore if previously switched\
-    for f in /etc/apk/repositories.d/*.list; do\
-      [ -f "$f" ] || continue\
-      sed -i "s|${MIRROR}|${OFFICIAL}|g" "$f"\
-    done\
-  else\
-    # Official unreachable — switch to mirror\
-    for f in /etc/apk/repositories.d/*.list; do\
-      [ -f "$f" ] || continue\
-      sed -i "s|${OFFICIAL}|${MIRROR}|g" "$f"\
-    done\
-  fi\
-}' "$PMC"
+cat > "$PMC" <<'EOF'
+#!/bin/sh
+# HarryWrt managed package-manager-call (25.12/apk)
+. /usr/share/libubox/jshn.sh
 
-# Hook the mirror check into the "update" action
-sed -i '/action="update"/a\\t\t\t\t\t_harrywrt_mirror_check' "$PMC"
+action="$1"
+shift
+
+if [ -x /usr/bin/apk ]; then
+	ipkg_bin="apk"
+else
+	ipkg_bin="opkg"
+fi
+
+_harrywrt_mirror_check() {
+	[ -x /usr/bin/harrywrt-mirror-check ] && /usr/bin/harrywrt-mirror-check >/dev/null 2>&1
+	return 0
+}
+
+_harrywrt_has_local_apk() {
+	for p in "$@"; do
+		case "$p" in
+			/*.apk|./*.apk|../*.apk|*.apk)
+				[ -f "$p" ] && return 0
+			;;
+		esac
+	done
+	return 1
+}
+
+case "$action" in
+list-installed)
+	if [ "$ipkg_bin" = "apk" ]; then
+		$ipkg_bin query --fields all --format json --installed --from system \* 2>/dev/null
+	else
+		cat /usr/lib/opkg/status
+	fi
+;;
+list-available)
+	if [ "$ipkg_bin" = "apk" ]; then
+		$ipkg_bin query --fields all --format json --available \* 2>/dev/null
+	else
+		lists_dir="$(sed -rne 's#^lists_dir \S+ (\S+)#\1#p' /etc/opkg.conf /etc/opkg/*.conf 2>/dev/null | tail -n 1)"
+		find "${lists_dir:-/usr/lib/opkg/lists}" -type f '!' -name '*.sig' | xargs -r gzip -cd
+	fi
+;;
+install|update|upgrade|remove)
+	(
+		cmd="$ipkg_bin"
+
+		if [ "$action" = "update" ]; then
+			_harrywrt_mirror_check
+		fi
+
+		if [ "$ipkg_bin" = "apk" ]; then
+			case "$action" in
+				install)
+					action="add"
+					if _harrywrt_has_local_apk "$@"; then
+						cmd="$cmd --allow-untrusted"
+					fi
+				;;
+				remove)
+					action="del"
+				;;
+			esac
+		fi
+
+		if [ "$ipkg_bin" = "apk" ]; then
+			while [ -n "$1" ]; do
+				case "$1" in
+					--autoremove)
+						shift
+					;;
+					--force-removal-of-dependent-packages)
+						cmd="$cmd -r"
+						shift
+					;;
+					--force-overwrite)
+						cmd="$cmd $1"
+						shift
+					;;
+					-*)
+						shift
+					;;
+					*)
+						break
+					;;
+				esac
+			done
+		else
+			while [ -n "$1" ]; do
+				case "$1" in
+					--autoremove|--force-overwrite|--force-removal-of-dependent-packages)
+						cmd="$cmd $1"
+						shift
+					;;
+					-*)
+						shift
+					;;
+					*)
+						break
+					;;
+				esac
+			done
+		fi
+
+		if flock -x 200; then
+			pkmcmd="$cmd $action $*"
+			$cmd "$action" "$@" >/tmp/ipkg.out 2>/tmp/ipkg.err
+			code=$?
+			stdout="$(cat /tmp/ipkg.out)"
+			stderr="$(cat /tmp/ipkg.err)"
+		else
+			code=255
+			stderr="Failed to acquire lock"
+		fi
+
+		json_init
+		json_add_int code "$code"
+		[ -n "$pkmcmd" ] && json_add_string pkmcmd "$pkmcmd"
+		[ -n "$stdout" ] && json_add_string stdout "$stdout"
+		[ -n "$stderr" ] && json_add_string stderr "$stderr"
+		json_dump
+	) 200>/tmp/ipkg.lock
+	rm -f /tmp/ipkg.lock /tmp/ipkg.err /tmp/ipkg.out
+;;
+*)
+	echo "Usage: $0 {list-installed|list-available|update}" >&2
+	echo "       $0 {install|upgrade|remove} pkg[ pkg...]" >&2
+	exit 1
+;;
+esac
+EOF
+
+chmod 0755 "$PMC"
+
+# Verify patch integrity — hard fail if either hook is missing
+grep -q -- '--allow-untrusted' "$PMC" || {
+	echo "HarryWrt package-manager patch failed: missing --allow-untrusted" >&2
+	cp -f "$PMC.harrywrt.bak" "$PMC"
+	exit 1
+}
+grep -q '_harrywrt_mirror_check' "$PMC" || {
+	echo "HarryWrt package-manager patch failed: missing mirror check" >&2
+	cp -f "$PMC.harrywrt.bak" "$PMC"
+	exit 1
+}
 
 exit 0
 PATCHEOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/92-patch-package-manager"
 else
-# 24.10 (opkg): only need mirror auto-detect, no signature issue
+# 24.10 (opkg): mirror auto-detect at first boot.
+# Rather than patching package-manager-call with sed (unreliable against compressed lines),
+# we write a standalone mirror-check script and call it from the update uci-default directly.
+# The mirror state is written to distfeeds.conf; subsequent opkg update calls pick it up.
 cat > "${FILES_DIR}/etc/uci-defaults/92-patch-package-manager" <<'PATCHEOF'
 #!/bin/sh
-PMC="/usr/libexec/package-manager-call"
-[ -f "$PMC" ] || exit 0
+# HarryWrt: install mirror auto-detect helper for opkg (24.10)
+# Called by /usr/bin/harrywrt-mirror-check before opkg update
 
-# Only patch once
-grep -q '_harrywrt_mirror_check' "$PMC" && exit 0
+MIRROR_SCRIPT="/usr/bin/harrywrt-mirror-check"
+[ -f "$MIRROR_SCRIPT" ] && exit 0
 
-# Add mirror auto-detect function and hook into update
-sed -i '/^case "\$action" in/i\
-_harrywrt_mirror_check() {\
-  OFFICIAL="downloads.openwrt.org"\
-  MIRROR="mirrors.tuna.tsinghua.edu.cn/openwrt"\
-  if wget -q -O /dev/null --timeout=3 "https://${OFFICIAL}" 2>/dev/null; then\
-    if [ -f /etc/opkg/distfeeds.conf ]; then\
-      sed -i "s|${MIRROR}|${OFFICIAL}|g" /etc/opkg/distfeeds.conf\
-    fi\
-  else\
-    if [ -f /etc/opkg/distfeeds.conf ]; then\
-      sed -i "s|${OFFICIAL}|${MIRROR}|g" /etc/opkg/distfeeds.conf\
-    fi\
-  fi\
-}' "$PMC"
+cat > "$MIRROR_SCRIPT" <<'EOF'
+#!/bin/sh
+OFFICIAL="downloads.openwrt.org"
+MIRROR="mirrors.tuna.tsinghua.edu.cn/openwrt"
+CONF="/etc/opkg/distfeeds.conf"
+[ -f "$CONF" ] || exit 0
+if wget -q -O /dev/null --timeout=3 "https://${OFFICIAL}" 2>/dev/null; then
+	sed -i "s|${MIRROR}|${OFFICIAL}|g" "$CONF"
+else
+	sed -i "s|${OFFICIAL}|${MIRROR}|g" "$CONF"
+fi
+EOF
+chmod 0755 "$MIRROR_SCRIPT"
 
-# For opkg, hook into the "update" action in the install|update|upgrade|remove case
-sed -i '/install|update|upgrade|remove)/a\\t\t[ "$action" = "update" ] && _harrywrt_mirror_check' "$PMC"
+# Run once on first boot to set the correct mirror immediately
+"$MIRROR_SCRIPT" || true
 
 exit 0
 PATCHEOF
@@ -423,27 +539,435 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/92-patch-package-manager"
 fi
 
 # ------------------------------------------------------------
-# 10) [Plus only] https-dns-proxy pre-configuration
-#     - Installed but disabled by default
-#     - User opts in via LuCI Services → HTTPS DNS Proxy
-#     - Pre-configured with Cloudflare and Quad9 as upstream
+# 10) [Plus only] AdGuard Home manager + stable runtime defaults
+#
+#     Plus uses AdGuard Home as the friendly encrypted-DNS entry.
+#     It is installed but disabled by default. Enabling it is done
+#     through harrywrt-feature-manager so dnsmasq is moved away
+#     from port 53 safely, health-checked, and rolled back on fail.
 # ------------------------------------------------------------
 if [[ "${PROFILE}" == "plus" ]]; then
 
-# uci-defaults: pre-configure https-dns-proxy with sensible defaults
-cat > "${FILES_DIR}/etc/uci-defaults/60-https-dns-proxy" <<'EOF'
+cat > "${FILES_DIR}/usr/libexec/harrywrt-feature-manager" <<'EOF'
 #!/bin/sh
-# Pre-configure https-dns-proxy with Cloudflare and Quad9
-# Service is disabled by default — user opts in via LuCI
-uci -q set https-dns-proxy.@https-dns-proxy[0]=https-dns-proxy 2>/dev/null || \
-  uci -q add https-dns-proxy https-dns-proxy
-uci -q set https-dns-proxy.@https-dns-proxy[0].address='https://1.1.1.1/dns-query'
-uci -q set https-dns-proxy.@https-dns-proxy[0].listen_addr='127.0.0.1'
-uci -q set https-dns-proxy.@https-dns-proxy[0].listen_port='5053'
-uci -q commit https-dns-proxy 2>/dev/null || true
+set -u
+
+log() { echo "[harrywrt] $*"; }
+err() { echo "[harrywrt] ERROR: $*" >&2; }
+has_init() { [ -x "/etc/init.d/$1" ]; }
+
+agh_service() {
+  if has_init adguardhome; then echo adguardhome; return 0; fi
+  if has_init AdGuardHome; then echo AdGuardHome; return 0; fi
+  return 1
+}
+
+restart_service() {
+  local svc="$1"
+  has_init "$svc" || return 0
+  /etc/init.d/$svc restart >/dev/null 2>&1 || /etc/init.d/$svc start >/dev/null 2>&1 || return 1
+}
+
+stop_disable() {
+  local svc="$1"
+  has_init "$svc" || return 0
+  /etc/init.d/$svc stop >/dev/null 2>&1 || true
+  /etc/init.d/$svc disable >/dev/null 2>&1 || true
+}
+
+enable_start() {
+  local svc="$1"
+  has_init "$svc" || { err "service not installed: $svc"; return 1; }
+  /etc/init.d/$svc enable >/dev/null 2>&1 || true
+  /etc/init.d/$svc start >/dev/null 2>&1 || /etc/init.d/$svc restart >/dev/null 2>&1 || return 1
+}
+
+write_adguard_default_yaml() {
+  [ -f /etc/adguardhome/adguardhome.yaml ] && return 0
+  mkdir -p /etc/adguardhome
+  cat > /etc/adguardhome/adguardhome.yaml <<'YAML'
+# HarryWrt managed default. You can edit it later in AdGuard Home Web UI.
+bind_host: 0.0.0.0
+bind_port: 3000
+users: []
+auth_attempts: 5
+block_auth_min: 15
+http_proxy: ""
+language: ""
+theme: auto
+dns:
+  bind_hosts:
+    - 0.0.0.0
+  port: 53
+  anonymize_client_ip: false
+  protection_enabled: true
+  blocking_mode: default
+  blocking_ipv4: ""
+  blocking_ipv6: ""
+  blocked_response_ttl: 10
+  parental_block_host: family-block.dns.adguard.com
+  safebrowsing_block_host: standard-block.dns.adguard.com
+  ratelimit: 0
+  ratelimit_subnet_len_ipv4: 24
+  ratelimit_subnet_len_ipv6: 56
+  ratelimit_whitelist: []
+  refuse_any: true
+  upstream_dns:
+    - https://1.1.1.1/dns-query
+    - https://9.9.9.9/dns-query
+  upstream_dns_file: ""
+  bootstrap_dns:
+    - 1.1.1.1
+    - 9.9.9.9
+  fallback_dns:
+    - 1.0.0.1
+    - 9.9.9.10
+  all_servers: false
+  fastest_addr: true
+  fastest_timeout: 1s
+  allowed_clients: []
+  disallowed_clients: []
+  blocked_hosts:
+    - version.bind
+    - id.server
+    - hostname.bind
+  trusted_proxies:
+    - 127.0.0.0/8
+    - ::1/128
+  cache_size: 4194304
+  cache_ttl_min: 0
+  cache_ttl_max: 0
+  cache_optimistic: true
+  bogus_nxdomain: []
+  aaaa_disabled: false
+  enable_dnssec: false
+  edns_client_subnet:
+    custom_ip: ""
+    enabled: false
+    use_custom: false
+  max_goroutines: 300
+  handle_ddr: true
+  ipset: []
+  ipset_file: ""
+  bootstrap_prefer_ipv6: false
+  upstream_timeout: 10s
+  private_networks: []
+  use_private_ptr_resolvers: true
+  local_ptr_upstreams:
+    - 127.0.0.1:5353
+  use_dns64: false
+  dns64_prefixes: []
+  serve_http3: false
+tls:
+  enabled: false
+querylog:
+  enabled: true
+  file_enabled: true
+  interval: 24h
+  size_memory: 1000
+  ignored: []
+statistics:
+  enabled: true
+  interval: 24h
+filters: []
+whitelist_filters: []
+user_rules: []
+dhcp:
+  enabled: false
+clients:
+  runtime_sources:
+    whois: true
+    arp: true
+    rdns: true
+    dhcp: true
+    hosts: true
+log:
+  file: ""
+  max_backups: 0
+  max_size: 100
+  max_age: 3
+  compress: false
+  local_time: false
+  verbose: false
+os:
+  group: ""
+  user: ""
+schema_version: 29
+YAML
+  chmod 600 /etc/adguardhome/adguardhome.yaml 2>/dev/null || true
+}
+
+backup_dhcp() {
+  mkdir -p /etc/harrywrt/backup
+  [ -f /etc/harrywrt/backup/dhcp.before-adguard ] || cp /etc/config/dhcp /etc/harrywrt/backup/dhcp.before-adguard 2>/dev/null || true
+}
+
+restore_dhcp_backup() {
+  if [ -f /etc/harrywrt/backup/dhcp.before-adguard ]; then
+    cp /etc/harrywrt/backup/dhcp.before-adguard /etc/config/dhcp
+  else
+    uci -q delete dhcp.@dnsmasq[0].port >/dev/null 2>&1 || true
+    uci -q set dhcp.@dnsmasq[0].noresolv='0'
+    uci -q commit dhcp
+  fi
+}
+
+adguard_enable() {
+  local svc
+  svc="$(agh_service)" || { err "AdGuard Home is not installed"; return 1; }
+
+  backup_dhcp
+  write_adguard_default_yaml
+
+  # Move dnsmasq away from :53 but keep it available for DHCP, local hostnames and PTR.
+  uci -q set dhcp.@dnsmasq[0].port='5353'
+  uci -q set dhcp.@dnsmasq[0].domainneeded='1'
+  uci -q set dhcp.@dnsmasq[0].boguspriv='1'
+  uci -q set dhcp.@dnsmasq[0].localservice='1'
+  uci -q set dhcp.@dnsmasq[0].noresolv='0'
+  uci -q commit dhcp
+
+  restart_service dnsmasq || { err "failed to restart dnsmasq on port 5353"; restore_dhcp_backup; restart_service dnsmasq || true; return 1; }
+  enable_start "$svc" || { err "failed to start AdGuard Home"; restore_dhcp_backup; restart_service dnsmasq || true; return 1; }
+
+  sleep 3
+  if nslookup openwrt.org 127.0.0.1 >/dev/null 2>&1; then
+    log "AdGuard Home enabled"
+    log "DNS: LAN clients -> AdGuard Home :53 -> DoH upstreams"
+    log "Web UI: http://router.lan:3000 or http://<router-ip>:3000"
+    return 0
+  fi
+
+  err "DNS health check failed, rolling back"
+  stop_disable "$svc"
+  restore_dhcp_backup
+  restart_service dnsmasq || true
+  return 1
+}
+
+adguard_disable() {
+  local svc
+  svc="$(agh_service)" || svc=""
+  [ -n "$svc" ] && stop_disable "$svc"
+  restore_dhcp_backup
+  rm -f /etc/harrywrt/backup/dhcp.before-adguard 2>/dev/null || true
+  restart_service dnsmasq || true
+  log "AdGuard Home disabled and dnsmasq restored"
+}
+
+upnp_enable() {
+  uci -q set upnpd.config.enabled='1' 2>/dev/null || true
+  uci -q commit upnpd 2>/dev/null || true
+  enable_start miniupnpd && log "UPnP enabled"
+}
+
+upnp_disable() {
+  uci -q set upnpd.config.enabled='0' 2>/dev/null || true
+  uci -q commit upnpd 2>/dev/null || true
+  stop_disable miniupnpd
+  log "UPnP disabled"
+}
+
+status_one() {
+  local svc="$1"
+  if has_init "$svc"; then
+    if /etc/init.d/$svc enabled >/dev/null 2>&1; then
+      echo "$svc: enabled"
+    else
+      echo "$svc: disabled"
+    fi
+  else
+    echo "$svc: not installed"
+  fi
+}
+
+status_all() {
+  local svc
+  svc="$(agh_service 2>/dev/null || true)"
+  [ -n "$svc" ] && status_one "$svc" || echo "adguardhome: not installed"
+  status_one miniupnpd
+  echo "dnsmasq.port=$(uci -q get dhcp.@dnsmasq[0].port 2>/dev/null || echo 53)"
+  echo "dnsmasq.noresolv=$(uci -q get dhcp.@dnsmasq[0].noresolv 2>/dev/null || echo unset)"
+  echo "dnsmasq.server=$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || echo unset)"
+}
+
+usage() {
+  cat <<USAGE
+Usage: harrywrt-feature-manager <enable|disable|status> <adguard|doh|upnp|all>
+
+Examples:
+  harrywrt-feature-manager status all
+  harrywrt-feature-manager enable adguard
+  harrywrt-feature-manager enable doh
+  harrywrt-feature-manager disable adguard
+USAGE
+}
+
+action="${1:-}"; feature="${2:-all}"
+case "$action:$feature" in
+  enable:adguard|enable:doh) adguard_enable ;;
+  disable:adguard|disable:doh) adguard_disable ;;
+  enable:upnp) upnp_enable ;;
+  disable:upnp) upnp_disable ;;
+  status:*|:*) status_all ;;
+  *) usage; exit 1 ;;
+esac
+EOF
+chmod 0755 "${FILES_DIR}/usr/libexec/harrywrt-feature-manager"
+
+cat > "${FILES_DIR}/etc/uci-defaults/60-harrywrt-plus-safe-defaults" <<'EOF'
+#!/bin/sh
+# Plus safe defaults:
+# - AdGuard Home is installed but does not take over DNS until enabled.
+# - UPnP is installed but disabled.
+# - dnsmasq remains the default stable DNS/DHCP service on first boot.
+
+[ -x /usr/libexec/harrywrt-feature-manager ] && ln -sf /usr/libexec/harrywrt-feature-manager /usr/bin/harrywrt-feature-manager
+
+# Keep dnsmasq normal by default. The AdGuard enable flow moves it to 5353 safely.
+uci -q delete dhcp.@dnsmasq[0].port >/dev/null 2>&1 || true
+uci -q set dhcp.@dnsmasq[0].noresolv='0'
+uci -q commit dhcp 2>/dev/null || true
+
+# Disable optional services on first boot.
+for svc in adguardhome AdGuardHome miniupnpd; do
+  [ -x /etc/init.d/$svc ] || continue
+  /etc/init.d/$svc stop >/dev/null 2>&1 || true
+  /etc/init.d/$svc disable >/dev/null 2>&1 || true
+done
+
+uci -q set upnpd.config.enabled='0' 2>/dev/null || true
+uci -q commit upnpd 2>/dev/null || true
+
 exit 0
 EOF
-chmod 0755 "${FILES_DIR}/etc/uci-defaults/60-https-dns-proxy"
+chmod 0755 "${FILES_DIR}/etc/uci-defaults/60-harrywrt-plus-safe-defaults"
+
+# LuCI AdGuard Home entry — JS view with link and password change instructions
+mkdir -p "${FILES_DIR}/usr/share/luci/menu.d"
+cat > "${FILES_DIR}/usr/share/luci/menu.d/adguardhome.json" <<'EOF'
+{
+  "admin/services/adguardhome": {
+    "title": "AdGuard Home",
+    "order": 60,
+    "action": {
+      "type": "view",
+      "path": "adguardhome/redirect"
+    }
+  }
+}
+EOF
+
+mkdir -p "${FILES_DIR}/www/luci-static/resources/view/adguardhome"
+cat > "${FILES_DIR}/www/luci-static/resources/view/adguardhome/redirect.js" <<'EOF'
+'use strict';
+'require view';
+
+return view.extend({
+    render: function() {
+        var host = window.location.hostname;
+        var url = 'http://' + host + ':3000';
+        var btn = E('a', {
+            'href': url,
+            'target': '_blank',
+            'rel': 'noopener noreferrer',
+            'style': 'display:inline-block;margin-top:1em;padding:0.5em 1.2em;background:#367fa9;color:#fff;text-decoration:none;border-radius:4px;font-size:1em;'
+        }, 'Open AdGuard Home');
+        return E('div', { 'style': 'padding:1em;' }, [
+            E('h2', {}, 'AdGuard Home'),
+            E('p', {}, 'AdGuard Home is installed but disabled by default.'),
+            E('p', {}, [
+                'To enable, run via SSH: ',
+                E('code', {}, 'harrywrt-feature-manager enable adguard')
+            ]),
+            E('p', {}, 'Once enabled, the management UI is accessible at:'),
+            E('p', {}, [ E('code', {}, url) ]),
+            btn,
+            E('hr', {}),
+            E('h3', {}, 'Change Username / Password'),
+            E('p', {}, 'After enabling AdGuard Home, change credentials via SSH (auto-installs dependencies if needed):'),
+            E('pre', { 'style': 'background:#f4f4f4;padding:0.8em;border-radius:4px;font-size:0.9em;overflow-x:auto;' }, [
+                '# Change password only\n',
+                'adguard-passwd newpassword\n\n',
+                '# Change both username and password\n',
+                'adguard-passwd newpassword newusername'
+            ])
+        ]);
+    },
+    handleSaveApply: null,
+    handleSave: null,
+    handleReset: null
+});
+EOF
+
+# adguard-passwd helper script
+mkdir -p "${FILES_DIR}/usr/bin"
+cat > "${FILES_DIR}/usr/bin/adguard-passwd" <<'EOF'
+#!/bin/sh
+# adguard-passwd — Change AdGuard Home credentials
+# Usage: adguard-passwd <newpassword> [newusername]
+
+YAML="/etc/adguardhome/adguardhome.yaml"
+NEW_PASS="$1"
+NEW_USER="${2:-}"
+
+if [ -z "$NEW_PASS" ]; then
+    echo "Usage: adguard-passwd <newpassword> [newusername]"
+    echo "Example: adguard-passwd mysecretpassword"
+    echo "         adguard-passwd mysecretpassword myadmin"
+    exit 1
+fi
+
+if [ ! -f "$YAML" ]; then
+    echo "Error: AdGuard Home config not found at $YAML"
+    echo "Make sure AdGuard Home is enabled first:"
+    echo "  harrywrt-feature-manager enable adguard"
+    exit 1
+fi
+
+# Auto-install apache-utils if htpasswd is not available
+if ! command -v htpasswd >/dev/null 2>&1; then
+    echo "htpasswd not found, installing apache-utils..."
+    if command -v apk >/dev/null 2>&1; then
+        apk update && apk add apache-utils
+    elif command -v opkg >/dev/null 2>&1; then
+        opkg update && opkg install apache-utils
+    else
+        echo "Error: Cannot install apache-utils. No package manager found."
+        exit 1
+    fi
+fi
+
+if ! command -v htpasswd >/dev/null 2>&1; then
+    echo "Error: Failed to install apache-utils."
+    exit 1
+fi
+
+HASH=$(htpasswd -bnBC 10 admin "${NEW_PASS}" | cut -d: -f2)
+
+/etc/init.d/adguardhome stop 2>/dev/null || true
+
+# Check if users list is empty (first-time setup) or already has entries
+if grep -q 'users: \[\]' "$YAML"; then
+    # No users configured yet — insert a proper user entry
+    USERNAME="${NEW_USER:-admin}"
+    sed -i "s|users: \[\]|users:\n  - name: ${USERNAME}\n    password: \"${HASH}\"|" "$YAML"
+    echo "Done. AdGuard Home initial credentials set (username: ${USERNAME})."
+else
+    # Existing user — update password (and optionally username)
+    sed -i "s|password:.*|password: \"${HASH}\"|" "$YAML"
+    if [ -n "$NEW_USER" ]; then
+        sed -i "s|^  - name:.*|  - name: ${NEW_USER}|" "$YAML"
+    fi
+    echo "Done. AdGuard Home credentials updated."
+fi
+
+/etc/init.d/adguardhome start 2>/dev/null || true
+EOF
+chmod 0755 "${FILES_DIR}/usr/bin/adguard-passwd"
+
+# Remove old Lua controller if present
+rm -f "${FILES_DIR}/usr/lib/lua/luci/controller/adguardhome.lua"
 
 fi
 
