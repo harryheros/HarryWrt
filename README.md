@@ -18,7 +18,6 @@ Minimal base system for users who want full control over what runs on their rout
 - Clean base system — no unnecessary modifications
 - Fully compatible with upstream OpenWrt packages
 - Pre-installed Passwall2 dependencies for offline setup
-- Modern firewall stack (nftables / fw4)
 
 ### Plus Edition
 Stable enhanced firmware. Everything in Clean, plus pre-installed tools that stay inert until explicitly enabled:
@@ -30,14 +29,6 @@ Stable enhanced firmware. Everything in Clean, plus pre-installed tools that sta
 - Wake-on-LAN
 - Network diagnostics — mtr-json
 
----
-
-## Shared Features
-
-- Dual OpenWrt version support (24.10.6 LTS + 25.12.4 stable)
-- Dual platform support (x86_64 + aarch64 ARM64)
-- Modern firewall stack (nftables / fw4)
-- Built and released automatically via GitHub Actions
 
 ---
 
@@ -58,6 +49,7 @@ Stable enhanced firmware. Everything in Clean, plus pre-installed tools that sta
 
 **Clean** — If you want full control, plan to install only what you need, or are deploying in a server/VM environment where minimal footprint matters.
 
+**Plus** — If you want a primary home router with WireGuard VPN, DDNS, UPnP, and traffic monitoring ready to configure out of the box.
 
 ### Which OpenWrt version should I choose?
 
@@ -157,17 +149,6 @@ harrywrt-feature-manager enable upnp
 ```
 
 
-### Removed from Plus mainline
-
-The following components are intentionally no longer included in Plus because they frequently modify routing, firewall rules, or background service state and are better suited for a separate Full/Lab profile:
-
-- `mwan3`
-- `banip`
-- `collectd` / `luci-app-statistics`
-- `harrywrt_guardian`
-
-Plus should be a daily-use firmware: more convenient than Clean, but not more fragile.
-
 ---
 
 ## Installing Passwall2
@@ -196,18 +177,68 @@ HarryWrt includes a built-in mirror auto-detection helper (`harrywrt-mirror-chec
 
 This runs transparently; no manual configuration is needed.
 
-If you need to switch manually:
+If you need to switch or restore manually:
 
 ```sh
-# Run the helper directly (both versions)
+# Let the helper auto-detect and set the correct source (both versions)
 /usr/bin/harrywrt-mirror-check
 
-# Or set manually — OpenWrt 25.12 (apk)
+# Switch to TUNA mirror manually — OpenWrt 25.12 (apk)
 sed -i 's_downloads.openwrt.org_mirrors.tuna.tsinghua.edu.cn/openwrt_g' /etc/apk/repositories.d/distfeeds.list
 
-# OpenWrt 24.10 (opkg)
+# Restore official source — OpenWrt 25.12 (apk)
+sed -i 's_mirrors.tuna.tsinghua.edu.cn/openwrt_downloads.openwrt.org_g' /etc/apk/repositories.d/distfeeds.list
+
+# Switch to TUNA mirror manually — OpenWrt 24.10 (opkg)
 sed -i 's_downloads.openwrt.org_mirrors.tuna.tsinghua.edu.cn/openwrt_g' /etc/opkg/distfeeds.conf
+
+# Restore official source — OpenWrt 24.10 (opkg)
+sed -i 's_mirrors.tuna.tsinghua.edu.cn/openwrt_downloads.openwrt.org_g' /etc/opkg/distfeeds.conf
 ```
+
+---
+
+## Installing AdGuard Home
+
+AdGuard Home is not pre-installed in HarryWrt. Install it directly from the package repository when needed.
+
+### On OpenWrt 25.12.4 (apk)
+
+```sh
+apk update && apk add adguardhome
+```
+
+### On OpenWrt 24.10.6 (opkg)
+
+```sh
+opkg update && opkg install adguardhome
+```
+
+### After installation
+
+AdGuard Home and dnsmasq both try to bind port 53. You need to move dnsmasq off port 53 before starting AdGuard Home, or they will conflict:
+
+```sh
+# Move dnsmasq to port 5353 (keeps DHCP and local DNS working)
+uci set dhcp.@dnsmasq[0].port='5353'
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+
+# Start AdGuard Home
+/etc/init.d/adguardhome enable
+/etc/init.d/adguardhome start
+```
+
+Then open `http://192.168.1.1:3000` to complete the AdGuard Home setup wizard.
+
+> If something goes wrong, restore dnsmasq to port 53 with:
+> ```sh
+> uci delete dhcp.@dnsmasq[0].port
+> uci commit dhcp
+> /etc/init.d/dnsmasq restart
+> /etc/init.d/adguardhome stop
+> /etc/init.d/adguardhome disable
+> ```
 
 ---
 

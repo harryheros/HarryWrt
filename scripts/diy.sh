@@ -596,8 +596,6 @@ status_one() {
 
 status_all() {
   status_one miniupnpd
-  echo "dnsmasq.port=$(uci -q get dhcp.@dnsmasq[0].port 2>/dev/null || echo 53)"
-  echo "dnsmasq.noresolv=$(uci -q get dhcp.@dnsmasq[0].noresolv 2>/dev/null || echo unset)"
 }
 
 usage() {
@@ -621,15 +619,9 @@ chmod 0755 "${FILES_DIR}/usr/libexec/harrywrt-feature-manager"
 
 cat > "${FILES_DIR}/etc/uci-defaults/60-harrywrt-plus-safe-defaults" <<'EOF'
 #!/bin/sh
-# Plus safe defaults:
-# - UPnP is installed but disabled.
-# - dnsmasq remains the default stable DNS/DHCP service on first boot.
+# Plus safe defaults: UPnP installed but disabled on first boot.
 
 [ -x /usr/libexec/harrywrt-feature-manager ] && ln -sf /usr/libexec/harrywrt-feature-manager /usr/bin/harrywrt-feature-manager
-
-uci -q delete dhcp.@dnsmasq[0].port >/dev/null 2>&1 || true
-uci -q set dhcp.@dnsmasq[0].noresolv='0'
-uci -q commit dhcp 2>/dev/null || true
 
 # Disable optional services on first boot.
 for svc in miniupnpd; do

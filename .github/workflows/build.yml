@@ -14,7 +14,7 @@ on:
       release_version:
         description: "Release version (e.g. v2.0)"
         required: true
-        default: "v2.0"
+        default: "v3.1"
       ssh_debug:
         description: "Enable SSH debug session (tmate)"
         required: false
