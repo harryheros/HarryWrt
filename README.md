@@ -149,7 +149,7 @@ Set a password on first login before further configuration.
 
 ### HarryWrt Feature Manager
 
-Plus Edition keeps network-takeover features disabled by default. Use the feature manager to enable them with service restart, DNS health check, and rollback:
+Plus Edition keeps optional services disabled by default. Use the feature manager to enable UPnP when needed:
 
 ```sh
 harrywrt-feature-manager status all
@@ -157,37 +157,10 @@ harrywrt-feature-manager enable upnp
 ```
 
 
-```sh
-harrywrt-feature-manager enable doh
-```
-
-
-
-When enabled, HarryWrt will:
-
-1. back up `/etc/config/dhcp`;
-2. move dnsmasq from port 53 to port 5353;
-4. use Cloudflare and Quad9 DoH as default upstreams;
-5. run a DNS health check;
-6. roll back automatically if DNS fails.
-
-After enabling, open:
-
-```text
-http://router.lan:3000
-http://192.168.1.1:3000
-```
-
-Default upstreams:
-
-- `https://1.1.1.1/dns-query`
-- `https://9.9.9.9/dns-query`
-
 ### Removed from Plus mainline
 
 The following components are intentionally no longer included in Plus because they frequently modify routing, firewall rules, or background service state and are better suited for a separate Full/Lab profile:
 
-- `https-dns-proxy`
 - `mwan3`
 - `banip`
 - `collectd` / `luci-app-statistics`

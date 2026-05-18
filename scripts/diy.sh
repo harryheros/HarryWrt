@@ -146,6 +146,7 @@ EOF
 # 2) SSH login banner
 # ------------------------------------------------------------
 if [[ "${PROFILE}" == "plus" ]]; then
+  PLUS_BANNER_LINE=" Plus extras: UPnP available, disabled by default"
 else
   PLUS_BANNER_LINE=""
 fi
@@ -537,10 +538,11 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/92-patch-package-manager"
 fi
 
 # ------------------------------------------------------------
+# 10) Plus-only safe defaults and feature manager
 #
-#     It is installed but disabled by default. Enabling it is done
-#     through harrywrt-feature-manager so dnsmasq is moved away
-#     from port 53 safely, health-checked, and rolled back on fail.
+#     Plus keeps optional network-facing services disabled by default.
+#     The feature manager currently manages only UPnP, avoiding DNS,
+#     routing, or firewall takeover logic.
 # ------------------------------------------------------------
 if [[ "${PROFILE}" == "plus" ]]; then
 
@@ -551,16 +553,6 @@ set -u
 log() { echo "[harrywrt] $*"; }
 err() { echo "[harrywrt] ERROR: $*" >&2; }
 has_init() { [ -x "/etc/init.d/$1" ]; }
-
-agh_service() {
-  return 1
-}
-
-restart_service() {
-  local svc="$1"
-  has_init "$svc" || return 0
-  /etc/init.d/$svc restart >/dev/null 2>&1 || /etc/init.d/$svc start >/dev/null 2>&1 || return 1
-}
 
 stop_disable() {
   local svc="$1"
@@ -574,159 +566,6 @@ enable_start() {
   has_init "$svc" || { err "service not installed: $svc"; return 1; }
   /etc/init.d/$svc enable >/dev/null 2>&1 || true
   /etc/init.d/$svc start >/dev/null 2>&1 || /etc/init.d/$svc restart >/dev/null 2>&1 || return 1
-}
-
-bind_host: 0.0.0.0
-bind_port: 3000
-users: []
-auth_attempts: 5
-block_auth_min: 15
-http_proxy: ""
-language: ""
-theme: auto
-dns:
-  bind_hosts:
-    - 0.0.0.0
-  port: 53
-  anonymize_client_ip: false
-  protection_enabled: true
-  blocking_mode: default
-  blocking_ipv4: ""
-  blocking_ipv6: ""
-  blocked_response_ttl: 10
-  ratelimit: 0
-  ratelimit_subnet_len_ipv4: 24
-  ratelimit_subnet_len_ipv6: 56
-  ratelimit_whitelist: []
-  refuse_any: true
-  upstream_dns:
-    - https://1.1.1.1/dns-query
-    - https://9.9.9.9/dns-query
-  upstream_dns_file: ""
-  bootstrap_dns:
-    - 1.1.1.1
-    - 9.9.9.9
-  fallback_dns:
-    - 1.0.0.1
-    - 9.9.9.10
-  all_servers: false
-  fastest_addr: true
-  fastest_timeout: 1s
-  allowed_clients: []
-  disallowed_clients: []
-  blocked_hosts:
-    - version.bind
-    - id.server
-    - hostname.bind
-  trusted_proxies:
-    - 127.0.0.0/8
-    - ::1/128
-  cache_size: 4194304
-  cache_ttl_min: 0
-  cache_ttl_max: 0
-  cache_optimistic: true
-  bogus_nxdomain: []
-  aaaa_disabled: false
-  enable_dnssec: false
-  edns_client_subnet:
-    custom_ip: ""
-    enabled: false
-    use_custom: false
-  max_goroutines: 300
-  handle_ddr: true
-  ipset: []
-  ipset_file: ""
-  bootstrap_prefer_ipv6: false
-  upstream_timeout: 10s
-  private_networks: []
-  use_private_ptr_resolvers: true
-  local_ptr_upstreams:
-    - 127.0.0.1:5353
-  use_dns64: false
-  dns64_prefixes: []
-  serve_http3: false
-tls:
-  enabled: false
-querylog:
-  enabled: true
-  file_enabled: true
-  interval: 24h
-  size_memory: 1000
-  ignored: []
-statistics:
-  enabled: true
-  interval: 24h
-filters: []
-whitelist_filters: []
-user_rules: []
-dhcp:
-  enabled: false
-clients:
-  runtime_sources:
-    whois: true
-    arp: true
-    rdns: true
-    dhcp: true
-    hosts: true
-log:
-  file: ""
-  max_backups: 0
-  max_size: 100
-  max_age: 3
-  compress: false
-  local_time: false
-  verbose: false
-os:
-  group: ""
-  user: ""
-schema_version: 29
-YAML
-}
-
-backup_dhcp() {
-  mkdir -p /etc/harrywrt/backup
-}
-
-restore_dhcp_backup() {
-  else
-    uci -q delete dhcp.@dnsmasq[0].port >/dev/null 2>&1 || true
-    uci -q set dhcp.@dnsmasq[0].noresolv='0'
-    uci -q commit dhcp
-  fi
-}
-
-  local svc
-
-  backup_dhcp
-
-  # Move dnsmasq away from :53 but keep it available for DHCP, local hostnames and PTR.
-  uci -q set dhcp.@dnsmasq[0].port='5353'
-  uci -q set dhcp.@dnsmasq[0].domainneeded='1'
-  uci -q set dhcp.@dnsmasq[0].boguspriv='1'
-  uci -q set dhcp.@dnsmasq[0].localservice='1'
-  uci -q set dhcp.@dnsmasq[0].noresolv='0'
-  uci -q commit dhcp
-
-  restart_service dnsmasq || { err "failed to restart dnsmasq on port 5353"; restore_dhcp_backup; restart_service dnsmasq || true; return 1; }
-
-  sleep 3
-  if nslookup openwrt.org 127.0.0.1 >/dev/null 2>&1; then
-    log "Web UI: http://router.lan:3000 or http://<router-ip>:3000"
-    return 0
-  fi
-
-  err "DNS health check failed, rolling back"
-  stop_disable "$svc"
-  restore_dhcp_backup
-  restart_service dnsmasq || true
-  return 1
-}
-
-  local svc
-  svc="$(agh_service)" || svc=""
-  [ -n "$svc" ] && stop_disable "$svc"
-  restore_dhcp_backup
-  restart_service dnsmasq || true
 }
 
 upnp_enable() {
@@ -756,20 +595,17 @@ status_one() {
 }
 
 status_all() {
-  local svc
-  svc="$(agh_service 2>/dev/null || true)"
   status_one miniupnpd
   echo "dnsmasq.port=$(uci -q get dhcp.@dnsmasq[0].port 2>/dev/null || echo 53)"
   echo "dnsmasq.noresolv=$(uci -q get dhcp.@dnsmasq[0].noresolv 2>/dev/null || echo unset)"
-  echo "dnsmasq.server=$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || echo unset)"
 }
 
 usage() {
   cat <<USAGE
-
-Examples:
+Usage:
   harrywrt-feature-manager status all
-  harrywrt-feature-manager enable doh
+  harrywrt-feature-manager enable upnp
+  harrywrt-feature-manager disable upnp
 USAGE
 }
 
@@ -796,6 +632,7 @@ uci -q set dhcp.@dnsmasq[0].noresolv='0'
 uci -q commit dhcp 2>/dev/null || true
 
 # Disable optional services on first boot.
+for svc in miniupnpd; do
   [ -x /etc/init.d/$svc ] || continue
   /etc/init.d/$svc stop >/dev/null 2>&1 || true
   /etc/init.d/$svc disable >/dev/null 2>&1 || true
@@ -807,100 +644,6 @@ uci -q commit upnpd 2>/dev/null || true
 exit 0
 EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/60-harrywrt-plus-safe-defaults"
-
-mkdir -p "${FILES_DIR}/usr/share/luci/menu.d"
-{
-    "order": 60,
-    "action": {
-      "type": "view",
-    }
-  }
-}
-EOF
-
-'use strict';
-'require view';
-
-return view.extend({
-    render: function() {
-        var host = window.location.hostname;
-        var url = 'http://' + host + ':3000';
-        var btn = E('a', {
-            'href': url,
-            'target': '_blank',
-            'rel': 'noopener noreferrer',
-            'style': 'display:inline-block;margin-top:1em;padding:0.5em 1.2em;background:#367fa9;color:#fff;text-decoration:none;border-radius:4px;font-size:1em;'
-        return E('div', { 'style': 'padding:1em;' }, [
-            E('p', {}, [
-                'To enable, run via SSH: ',
-            ]),
-            E('p', {}, 'Once enabled, the management UI is accessible at:'),
-            E('p', {}, [ E('code', {}, url) ]),
-            btn,
-            E('hr', {}),
-            E('h3', {}, 'Change Username / Password'),
-            E('pre', { 'style': 'background:#f4f4f4;padding:0.8em;border-radius:4px;font-size:0.9em;overflow-x:auto;' }, [
-                '# Change password only\n',
-                '# Change both username and password\n',
-            ])
-        ]);
-    },
-    handleSaveApply: null,
-    handleSave: null,
-    handleReset: null
-});
-EOF
-
-mkdir -p "${FILES_DIR}/usr/bin"
-#!/bin/sh
-
-NEW_PASS="$1"
-NEW_USER="${2:-}"
-
-if [ -z "$NEW_PASS" ]; then
-    exit 1
-fi
-
-if [ ! -f "$YAML" ]; then
-    exit 1
-fi
-
-# Auto-install apache-utils if htpasswd is not available
-if ! command -v htpasswd >/dev/null 2>&1; then
-    echo "htpasswd not found, installing apache-utils..."
-    if command -v apk >/dev/null 2>&1; then
-        apk update && apk add apache-utils
-    elif command -v opkg >/dev/null 2>&1; then
-        opkg update && opkg install apache-utils
-    else
-        echo "Error: Cannot install apache-utils. No package manager found."
-        exit 1
-    fi
-fi
-
-if ! command -v htpasswd >/dev/null 2>&1; then
-    echo "Error: Failed to install apache-utils."
-    exit 1
-fi
-
-HASH=$(htpasswd -bnBC 10 admin "${NEW_PASS}" | cut -d: -f2)
-
-# Check if users list is empty (first-time setup) or already has entries
-if grep -q 'users: \[\]' "$YAML"; then
-    # No users configured yet — insert a proper user entry
-    USERNAME="${NEW_USER:-admin}"
-    sed -i "s|users: \[\]|users:\n  - name: ${USERNAME}\n    password: \"${HASH}\"|" "$YAML"
-else
-    # Existing user — update password (and optionally username)
-    sed -i "s|password:.*|password: \"${HASH}\"|" "$YAML"
-    if [ -n "$NEW_USER" ]; then
-        sed -i "s|^  - name:.*|  - name: ${NEW_USER}|" "$YAML"
-    fi
-fi
-
-EOF
-
-# Remove old Lua controller if present
 
 fi
 
