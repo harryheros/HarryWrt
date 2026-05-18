@@ -214,6 +214,7 @@ jobs:
             "CONFIG_PACKAGE_v2ray-geosite"
             "CONFIG_PACKAGE_xray-core"
             "CONFIG_PACKAGE_sing-box"
+            "CONFIG_PACKAGE_lyaml"
           )
 
           # Plus-only required packages

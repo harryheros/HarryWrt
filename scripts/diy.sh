@@ -409,7 +409,7 @@ install|update|upgrade|remove)
 				install)
 					action="add"
 					if _harrywrt_has_local_apk "$@"; then
-						cmd="$cmd --allow-untrusted"
+						cmd="$cmd --allow-untrusted --no-network"
 					fi
 				;;
 				remove)
