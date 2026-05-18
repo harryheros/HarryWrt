@@ -23,7 +23,6 @@ Minimal base system for users who want full control over what runs on their rout
 ### Plus Edition
 Stable enhanced firmware. Everything in Clean, plus pre-installed tools that stay inert until explicitly enabled:
 
-- AdGuard Home — user-friendly encrypted DNS / DoH and DNS filtering, disabled by default; enable safely with `harrywrt-feature-manager enable adguard`
 - WireGuard VPN — kernel module + LuCI UI + QR code export
 - DDNS — Cloudflare and No-IP scripts with LuCI management
 - UPnP / NAT-PMP — miniupnpd-nftables, disabled by default; enable with `harrywrt-feature-manager enable upnp`
@@ -59,7 +58,6 @@ Stable enhanced firmware. Everything in Clean, plus pre-installed tools that sta
 
 **Clean** — If you want full control, plan to install only what you need, or are deploying in a server/VM environment where minimal footprint matters.
 
-**Plus** — If you are migrating from pfSense/OPNsense or want a primary home router with DDNS, VPN, AdGuard Home DNS, and traffic monitoring ready to configure out of the box.
 
 ### Which OpenWrt version should I choose?
 
@@ -120,7 +118,6 @@ Pre-installed dependencies: xray-core, sing-box, geoview, v2ray-geoip, v2ray-geo
 
 | Component | Package(s) | Notes |
 |-----------|-----------|-------|
-| AdGuard Home | adguardhome | Friendly encrypted DNS / DoH and DNS filtering; disabled by default; safe enable/rollback via feature manager |
 | WireGuard VPN | kmod-wireguard, wireguard-tools, luci-app-wireguard, qrencode | QR code peer export supported |
 | DDNS | ddns-scripts, luci-app-ddns, ddns-scripts-cloudflare, ddns-scripts-noip | Disabled by default |
 | UPnP / NAT-PMP | miniupnpd-nftables, luci-app-upnp | Disabled by default; enable via feature manager |
@@ -156,26 +153,20 @@ Plus Edition keeps network-takeover features disabled by default. Use the featur
 
 ```sh
 harrywrt-feature-manager status all
-harrywrt-feature-manager enable adguard
-harrywrt-feature-manager disable adguard
 harrywrt-feature-manager enable upnp
 ```
 
-`enable doh` is kept as an alias for `enable adguard`:
 
 ```sh
 harrywrt-feature-manager enable doh
 ```
 
-### AdGuard Home DoH (Plus only)
 
-AdGuard Home is the recommended DoH path for HarryWrt Plus. It provides a friendly web UI, encrypted upstream DNS, cache, query log, and DNS filtering. It is installed but **disabled by default** so the first boot remains as stable as Clean Edition.
 
 When enabled, HarryWrt will:
 
 1. back up `/etc/config/dhcp`;
 2. move dnsmasq from port 53 to port 5353;
-3. start AdGuard Home on port 53;
 4. use Cloudflare and Quad9 DoH as default upstreams;
 5. run a DNS health check;
 6. roll back automatically if DNS fails.
@@ -297,7 +288,6 @@ All modifications and distributed binaries comply with upstream OpenWrt licensin
 - LuCI Project
 - Argon Theme (jerrykuku)
 - Passwall2 (Openwrt-Passwall Organization)
-- AdGuard Home
 
 ---
 

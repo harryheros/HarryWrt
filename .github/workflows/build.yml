@@ -368,7 +368,6 @@ jobs:
             FEATURES=$(printf '%s\n' \
               "- Argon theme included (default: Bootstrap)" \
               "- Passwall2 offline-ready dependencies" \
-              "- AdGuard Home (friendly encrypted DNS / DoH, disabled by default, safe enable flow)" \
               "- WireGuard VPN (wireguard-tools + luci-app-wireguard)" \
               "- DDNS (Cloudflare + No-IP scripts)" \
               "- UPnP / NAT-PMP (miniupnpd-nftables, disabled by default)" \

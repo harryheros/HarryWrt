@@ -15,7 +15,6 @@ set -euo pipefail
 # # - First boot: clean non-existent passwall_packages feed
 # - First boot: patch LuCI package manager (apk trust + mirror auto-detect)
 # - NTP configuration preserved
-# - [plus only] AdGuard Home pre-installed, disabled by default, safe enable flow
 # - [plus only] UPnP disabled by default
 # =============================================================
 
@@ -147,7 +146,6 @@ EOF
 # 2) SSH login banner
 # ------------------------------------------------------------
 if [[ "${PROFILE}" == "plus" ]]; then
-  PLUS_BANNER_LINE=" Plus tools available: use harrywrt-feature-manager to safely enable AdGuard DoH/UPnP"$'\n'"---------------------------------------------------------------"
 else
   PLUS_BANNER_LINE=""
 fi
@@ -539,9 +537,7 @@ chmod 0755 "${FILES_DIR}/etc/uci-defaults/92-patch-package-manager"
 fi
 
 # ------------------------------------------------------------
-# 10) [Plus only] AdGuard Home manager + stable runtime defaults
 #
-#     Plus uses AdGuard Home as the friendly encrypted-DNS entry.
 #     It is installed but disabled by default. Enabling it is done
 #     through harrywrt-feature-manager so dnsmasq is moved away
 #     from port 53 safely, health-checked, and rolled back on fail.
@@ -557,8 +553,6 @@ err() { echo "[harrywrt] ERROR: $*" >&2; }
 has_init() { [ -x "/etc/init.d/$1" ]; }
 
 agh_service() {
-  if has_init adguardhome; then echo adguardhome; return 0; fi
-  if has_init AdGuardHome; then echo AdGuardHome; return 0; fi
   return 1
 }
 
@@ -582,11 +576,6 @@ enable_start() {
   /etc/init.d/$svc start >/dev/null 2>&1 || /etc/init.d/$svc restart >/dev/null 2>&1 || return 1
 }
 
-write_adguard_default_yaml() {
-  [ -f /etc/adguardhome/adguardhome.yaml ] && return 0
-  mkdir -p /etc/adguardhome
-  cat > /etc/adguardhome/adguardhome.yaml <<'YAML'
-# HarryWrt managed default. You can edit it later in AdGuard Home Web UI.
 bind_host: 0.0.0.0
 bind_port: 3000
 users: []
@@ -605,8 +594,6 @@ dns:
   blocking_ipv4: ""
   blocking_ipv6: ""
   blocked_response_ttl: 10
-  parental_block_host: family-block.dns.adguard.com
-  safebrowsing_block_host: standard-block.dns.adguard.com
   ratelimit: 0
   ratelimit_subnet_len_ipv4: 24
   ratelimit_subnet_len_ipv6: 56
@@ -694,17 +681,13 @@ os:
   user: ""
 schema_version: 29
 YAML
-  chmod 600 /etc/adguardhome/adguardhome.yaml 2>/dev/null || true
 }
 
 backup_dhcp() {
   mkdir -p /etc/harrywrt/backup
-  [ -f /etc/harrywrt/backup/dhcp.before-adguard ] || cp /etc/config/dhcp /etc/harrywrt/backup/dhcp.before-adguard 2>/dev/null || true
 }
 
 restore_dhcp_backup() {
-  if [ -f /etc/harrywrt/backup/dhcp.before-adguard ]; then
-    cp /etc/harrywrt/backup/dhcp.before-adguard /etc/config/dhcp
   else
     uci -q delete dhcp.@dnsmasq[0].port >/dev/null 2>&1 || true
     uci -q set dhcp.@dnsmasq[0].noresolv='0'
@@ -712,12 +695,9 @@ restore_dhcp_backup() {
   fi
 }
 
-adguard_enable() {
   local svc
-  svc="$(agh_service)" || { err "AdGuard Home is not installed"; return 1; }
 
   backup_dhcp
-  write_adguard_default_yaml
 
   # Move dnsmasq away from :53 but keep it available for DHCP, local hostnames and PTR.
   uci -q set dhcp.@dnsmasq[0].port='5353'
@@ -728,12 +708,9 @@ adguard_enable() {
   uci -q commit dhcp
 
   restart_service dnsmasq || { err "failed to restart dnsmasq on port 5353"; restore_dhcp_backup; restart_service dnsmasq || true; return 1; }
-  enable_start "$svc" || { err "failed to start AdGuard Home"; restore_dhcp_backup; restart_service dnsmasq || true; return 1; }
 
   sleep 3
   if nslookup openwrt.org 127.0.0.1 >/dev/null 2>&1; then
-    log "AdGuard Home enabled"
-    log "DNS: LAN clients -> AdGuard Home :53 -> DoH upstreams"
     log "Web UI: http://router.lan:3000 or http://<router-ip>:3000"
     return 0
   fi
@@ -745,14 +722,11 @@ adguard_enable() {
   return 1
 }
 
-adguard_disable() {
   local svc
   svc="$(agh_service)" || svc=""
   [ -n "$svc" ] && stop_disable "$svc"
   restore_dhcp_backup
-  rm -f /etc/harrywrt/backup/dhcp.before-adguard 2>/dev/null || true
   restart_service dnsmasq || true
-  log "AdGuard Home disabled and dnsmasq restored"
 }
 
 upnp_enable() {
@@ -784,7 +758,6 @@ status_one() {
 status_all() {
   local svc
   svc="$(agh_service 2>/dev/null || true)"
-  [ -n "$svc" ] && status_one "$svc" || echo "adguardhome: not installed"
   status_one miniupnpd
   echo "dnsmasq.port=$(uci -q get dhcp.@dnsmasq[0].port 2>/dev/null || echo 53)"
   echo "dnsmasq.noresolv=$(uci -q get dhcp.@dnsmasq[0].noresolv 2>/dev/null || echo unset)"
@@ -793,20 +766,15 @@ status_all() {
 
 usage() {
   cat <<USAGE
-Usage: harrywrt-feature-manager <enable|disable|status> <adguard|doh|upnp|all>
 
 Examples:
   harrywrt-feature-manager status all
-  harrywrt-feature-manager enable adguard
   harrywrt-feature-manager enable doh
-  harrywrt-feature-manager disable adguard
 USAGE
 }
 
 action="${1:-}"; feature="${2:-all}"
 case "$action:$feature" in
-  enable:adguard|enable:doh) adguard_enable ;;
-  disable:adguard|disable:doh) adguard_disable ;;
   enable:upnp) upnp_enable ;;
   disable:upnp) upnp_disable ;;
   status:*|:*) status_all ;;
@@ -818,19 +786,16 @@ chmod 0755 "${FILES_DIR}/usr/libexec/harrywrt-feature-manager"
 cat > "${FILES_DIR}/etc/uci-defaults/60-harrywrt-plus-safe-defaults" <<'EOF'
 #!/bin/sh
 # Plus safe defaults:
-# - AdGuard Home is installed but does not take over DNS until enabled.
 # - UPnP is installed but disabled.
 # - dnsmasq remains the default stable DNS/DHCP service on first boot.
 
 [ -x /usr/libexec/harrywrt-feature-manager ] && ln -sf /usr/libexec/harrywrt-feature-manager /usr/bin/harrywrt-feature-manager
 
-# Keep dnsmasq normal by default. The AdGuard enable flow moves it to 5353 safely.
 uci -q delete dhcp.@dnsmasq[0].port >/dev/null 2>&1 || true
 uci -q set dhcp.@dnsmasq[0].noresolv='0'
 uci -q commit dhcp 2>/dev/null || true
 
 # Disable optional services on first boot.
-for svc in adguardhome AdGuardHome miniupnpd; do
   [ -x /etc/init.d/$svc ] || continue
   /etc/init.d/$svc stop >/dev/null 2>&1 || true
   /etc/init.d/$svc disable >/dev/null 2>&1 || true
@@ -843,23 +808,16 @@ exit 0
 EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/60-harrywrt-plus-safe-defaults"
 
-# LuCI AdGuard Home entry — JS view with link and password change instructions
 mkdir -p "${FILES_DIR}/usr/share/luci/menu.d"
-cat > "${FILES_DIR}/usr/share/luci/menu.d/adguardhome.json" <<'EOF'
 {
-  "admin/services/adguardhome": {
-    "title": "AdGuard Home",
     "order": 60,
     "action": {
       "type": "view",
-      "path": "adguardhome/redirect"
     }
   }
 }
 EOF
 
-mkdir -p "${FILES_DIR}/www/luci-static/resources/view/adguardhome"
-cat > "${FILES_DIR}/www/luci-static/resources/view/adguardhome/redirect.js" <<'EOF'
 'use strict';
 'require view';
 
@@ -872,25 +830,18 @@ return view.extend({
             'target': '_blank',
             'rel': 'noopener noreferrer',
             'style': 'display:inline-block;margin-top:1em;padding:0.5em 1.2em;background:#367fa9;color:#fff;text-decoration:none;border-radius:4px;font-size:1em;'
-        }, 'Open AdGuard Home');
         return E('div', { 'style': 'padding:1em;' }, [
-            E('h2', {}, 'AdGuard Home'),
-            E('p', {}, 'AdGuard Home is installed but disabled by default.'),
             E('p', {}, [
                 'To enable, run via SSH: ',
-                E('code', {}, 'harrywrt-feature-manager enable adguard')
             ]),
             E('p', {}, 'Once enabled, the management UI is accessible at:'),
             E('p', {}, [ E('code', {}, url) ]),
             btn,
             E('hr', {}),
             E('h3', {}, 'Change Username / Password'),
-            E('p', {}, 'After enabling AdGuard Home, change credentials via SSH (auto-installs dependencies if needed):'),
             E('pre', { 'style': 'background:#f4f4f4;padding:0.8em;border-radius:4px;font-size:0.9em;overflow-x:auto;' }, [
                 '# Change password only\n',
-                'adguard-passwd newpassword\n\n',
                 '# Change both username and password\n',
-                'adguard-passwd newpassword newusername'
             ])
         ]);
     },
@@ -900,28 +851,17 @@ return view.extend({
 });
 EOF
 
-# adguard-passwd helper script
 mkdir -p "${FILES_DIR}/usr/bin"
-cat > "${FILES_DIR}/usr/bin/adguard-passwd" <<'EOF'
 #!/bin/sh
-# adguard-passwd — Change AdGuard Home credentials
-# Usage: adguard-passwd <newpassword> [newusername]
 
-YAML="/etc/adguardhome/adguardhome.yaml"
 NEW_PASS="$1"
 NEW_USER="${2:-}"
 
 if [ -z "$NEW_PASS" ]; then
-    echo "Usage: adguard-passwd <newpassword> [newusername]"
-    echo "Example: adguard-passwd mysecretpassword"
-    echo "         adguard-passwd mysecretpassword myadmin"
     exit 1
 fi
 
 if [ ! -f "$YAML" ]; then
-    echo "Error: AdGuard Home config not found at $YAML"
-    echo "Make sure AdGuard Home is enabled first:"
-    echo "  harrywrt-feature-manager enable adguard"
     exit 1
 fi
 
@@ -945,31 +885,23 @@ fi
 
 HASH=$(htpasswd -bnBC 10 admin "${NEW_PASS}" | cut -d: -f2)
 
-/etc/init.d/adguardhome stop 2>/dev/null || true
-
 # Check if users list is empty (first-time setup) or already has entries
 if grep -q 'users: \[\]' "$YAML"; then
     # No users configured yet — insert a proper user entry
     USERNAME="${NEW_USER:-admin}"
     sed -i "s|users: \[\]|users:\n  - name: ${USERNAME}\n    password: \"${HASH}\"|" "$YAML"
-    echo "Done. AdGuard Home initial credentials set (username: ${USERNAME})."
 else
     # Existing user — update password (and optionally username)
     sed -i "s|password:.*|password: \"${HASH}\"|" "$YAML"
     if [ -n "$NEW_USER" ]; then
         sed -i "s|^  - name:.*|  - name: ${NEW_USER}|" "$YAML"
     fi
-    echo "Done. AdGuard Home credentials updated."
 fi
 
-/etc/init.d/adguardhome start 2>/dev/null || true
 EOF
-chmod 0755 "${FILES_DIR}/usr/bin/adguard-passwd"
 
 # Remove old Lua controller if present
-rm -f "${FILES_DIR}/usr/lib/lua/luci/controller/adguardhome.lua"
 
 fi
 
 echo "DIY script executed successfully for OpenWrt ${HARRYWRT_VER} / ${TARGET} / ${PROFILE}."
-
