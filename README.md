@@ -20,14 +20,11 @@ Minimal base system for users who want full control over what runs on their rout
 - Pre-installed Passwall2 dependencies for offline setup
 
 ### Plus Edition
-Stable enhanced firmware. Everything in Clean, plus pre-installed tools that stay inert until explicitly enabled:
+Stable enhanced firmware. Everything in Clean, plus:
 
-- WireGuard VPN — kernel module + LuCI UI + QR code export
-- DDNS — Cloudflare and No-IP scripts with LuCI management
-- UPnP / NAT-PMP — miniupnpd-nftables, disabled by default; enable with `harrywrt-feature-manager enable upnp`
-- Traffic monitoring — nlbwmon per-device bandwidth tracking
-- Wake-on-LAN
-- Network diagnostics — mtr-json
+- WireGuard VPN, DDNS, UPnP / NAT-PMP, traffic monitoring (nlbwmon), Wake-on-LAN, network diagnostics
+- UPnP disabled by default; all other components ready to configure on first boot
+- See [Included Components](#included-components) for full package list
 
 
 ---
@@ -126,7 +123,7 @@ Pre-installed dependencies: xray-core, sing-box, geoview, v2ray-geoip, v2ray-geo
 - LAN IP: 192.168.1.1
 - User: root
 - Password: unset on first boot
-- NTP: enabled (pool.ntp.org)
+- NTP: enabled (0-3.openwrt.pool.ntp.org)
 
 ---
 
@@ -141,11 +138,12 @@ Set a password on first login before further configuration.
 
 ### HarryWrt Feature Manager
 
-Plus Edition keeps optional services disabled by default. Use the feature manager to enable UPnP when needed:
+Plus Edition keeps UPnP disabled by default. Use the feature manager to enable or disable it:
 
 ```sh
 harrywrt-feature-manager status all
 harrywrt-feature-manager enable upnp
+harrywrt-feature-manager disable upnp
 ```
 
 
@@ -254,20 +252,17 @@ LuCI → System → System → Language and Style → Theme → Argon
 
 ## Integrity Verification
 
-Each release includes SHA256 checksum files. Always verify downloaded images before use:
+Each release includes SHA256 checksum files. Download the checksum file and the `.img.gz` into the same directory, then verify:
 
 ```sh
-# 24.10.6 Clean
-sha256sum -c SHA256SUMS-24.10.6-clean-x86_64
-
-# 24.10.6 Plus
-sha256sum -c SHA256SUMS-24.10.6-plus-x86_64
-
-# 25.12.4 Clean
-sha256sum -c SHA256SUMS-25.12.4-clean-x86_64
-
-# 25.12.4 Plus
+# Example: 25.12.4 Plus x86_64
+cd ~/Downloads
 sha256sum -c SHA256SUMS-25.12.4-plus-x86_64
+
+# Other variants follow the same pattern
+sha256sum -c SHA256SUMS-24.10.6-clean-x86_64
+sha256sum -c SHA256SUMS-24.10.6-plus-x86_64
+sha256sum -c SHA256SUMS-25.12.4-clean-x86_64
 ```
 
 ---
