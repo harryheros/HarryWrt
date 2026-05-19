@@ -195,10 +195,27 @@ DISTRIB_ID='OpenWrt'
 DISTRIB_RELEASE='${HARRYWRT_VER}'
 DISTRIB_REVISION='${REVISION}'
 DISTRIB_CODENAME='HarryWrt'
-DISTRIB_TARGET=''
+DISTRIB_TARGET='${TARGET}'
 DISTRIB_ARCH=''
 DISTRIB_DESCRIPTION='${DESC}'
 DISTRIB_TAINTS=''
+EOF
+
+mkdir -p "${FILES_DIR}/usr/lib"
+cat > "${FILES_DIR}/usr/lib/os-release" <<EOF
+NAME="HarryWrt"
+VERSION="${HARRYWRT_REL:-${HARRYWRT_VER}}"
+ID="harrywrt"
+ID_LIKE="openwrt"
+PRETTY_NAME="${DESC}"
+VERSION_ID="${HARRYWRT_REL:-${HARRYWRT_VER}}"
+BUILD_ID="${REVISION}"
+OPENWRT_RELEASE="${DESC}"
+OPENWRT_BOARD="${TARGET}"
+OPENWRT_ARCH=""
+OPENWRT_TAINTS=""
+HOME_URL="https://downloads.openwrt.org/"
+FIRMWARE_URL="https://downloads.openwrt.org/"
 EOF
 
 # uci-default fills in DISTRIB_TARGET and DISTRIB_ARCH at runtime
@@ -942,37 +959,12 @@ fi
 # HarryWrt version widget in LuCI Status page
 # Uses LuCI's official status/include mechanism — zero side effects.
 # File 05_harrywrt.js loads before 10_system.js (system info).
-# Reads DISTRIB_DESCRIPTION from /etc/openwrt_release via CGI.
+# Reads version info from ubus system board (which reads /usr/lib/os-release).
 # ------------------------------------------------------------
 mkdir -p "${FILES_DIR}/www/luci-static/resources/view/status/include"
 
 cat > "${FILES_DIR}/www/luci-static/resources/view/status/include/05_harrywrt.js" <<'EOF'
-'use strict';
-'require baseclass';
-'require fs';
-
-return baseclass.extend({
-    title: _('HarryWrt'),
-
-    load: function() {
-        return fs.lines('/etc/openwrt_release').catch(function() { return []; });
-    },
-
-    render: function(lines) {
-        var desc = '';
-        for (var i = 0; i < lines.length; i++) {
-            var m = lines[i].match(/^DISTRIB_DESCRIPTION='?([^']+)'?/);
-            if (m) { desc = m[1]; break; }
-        }
-        if (!desc) return null;
-
-        return E('table', { 'class': 'table' }, [
-            E('tr', { 'class': 'tr table-titles' }, [
-                E('th', { 'class': 'th', 'colspan': '2', 'style': 'background:#367fa9;color:#fff;padding:6px 10px;font-size:1em;' }, desc)
-            ])
-        ]);
-    }
-});
+'use strict';'require baseclass';'require rpc';var callBoard=rpc.declare({object:'system',method:'board'});return baseclass.extend({title:_('HarryWrt'),load:function(){return callBoard();},render:function(data){var desc=data&&data.release&&data.release.description;if(!desc||desc.indexOf('HarryWrt')<0)return null;return E('table',{'class':'table'},[E('tr',{'class':'tr table-titles'},[E('th',{'class':'th','colspan':'2','style':'background:#367fa9;color:#fff;padding:6px 10px;font-size:1em;'},desc)])]);} });
 EOF
 
 echo "DIY script executed successfully for OpenWrt ${HARRYWRT_VER} / ${TARGET} / ${PROFILE}."
