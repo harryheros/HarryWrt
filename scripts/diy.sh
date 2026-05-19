@@ -133,8 +133,6 @@ config system
   option log_proto 'stderr'
   option conloglevel '8'
   option cronloglevel '${CRONLOGLEVEL}'
-  option description 'HarryWrt ${HARRYWRT_REL:-${HARRYWRT_VER}} ${EDITION}'
-  option revision 'HarryWrt ${HARRYWRT_REL:-${HARRYWRT_VER}} ${EDITION} • OpenWrt ${HARRYWRT_VER} • ${TARGET}'
 
 config timeserver 'ntp'
   option enabled '1'
@@ -194,23 +192,13 @@ fi
 mkdir -p "${FILES_DIR}/etc"
 cat > "${FILES_DIR}/etc/openwrt_release" <<EOF
 DISTRIB_ID='OpenWrt'
-DISTRIB_RELEASE='${REVISION}'
-DISTRIB_REVISION='OpenWrt ${HARRYWRT_VER}'
+DISTRIB_RELEASE='${HARRYWRT_VER}'
+DISTRIB_REVISION='${REVISION}'
 DISTRIB_CODENAME='HarryWrt'
 DISTRIB_TARGET=''
 DISTRIB_ARCH=''
 DISTRIB_DESCRIPTION='${DESC}'
 DISTRIB_TAINTS=''
-EOF
-
-cat > "${FILES_DIR}/etc/os-release" <<EOF
-NAME="HarryWrt"
-VERSION="${HARRYWRT_REL:-${HARRYWRT_VER}}"
-ID="openwrt"
-ID_LIKE="lede openwrt"
-PRETTY_NAME="${DESC}"
-VERSION_ID="${HARRYWRT_VER}"
-HOME_URL="https://github.com/harryheros/harrywrt"
 EOF
 
 # uci-default fills in DISTRIB_TARGET and DISTRIB_ARCH at runtime
@@ -742,7 +730,7 @@ DNS_STATUS="$(check_dns)"
 IPV6_STATUS="$(check_ipv6)"
 WAN_IP="$(check_wan_ip)"
 
-JSON="{"timestamp":"${TS}","wan":"${WAN_STATUS}","dns":"${DNS_STATUS}","ipv6":"${IPV6_STATUS}","wan_ip":"${WAN_IP}"}"
+JSON="$(printf '{"timestamp":"%s","wan":"%s","dns":"%s","ipv6":"%s","wan_ip":"%s"}' "$TS" "$WAN_STATUS" "$DNS_STATUS" "$IPV6_STATUS" "$WAN_IP")"
 
 if [ "${1:-}" = "--cache" ]; then
     echo "$JSON" > "$CACHE_FILE"
@@ -895,7 +883,7 @@ DISK="$(echo "$ROOT_DEV" | sed 's/[0-9]*$//;s/p$//')"
 
 # Find the overlay partition (last partition on disk)
 OVERLAY_PART="$(parted -s "$DISK" print 2>/dev/null | awk '/^ +[0-9]/ {last=$1} END {print last}')"
-[ -z "$OVERLAY_PART" ] || exit 0
+[ -z "$OVERLAY_PART" ] && exit 0
 
 # Get disk size and last partition end in MB
 DISK_SIZE_MB="$(parted -s "$DISK" unit MB print 2>/dev/null | grep "^Disk $DISK" | grep -o '[0-9]*MB' | tr -d 'MB')"
@@ -949,5 +937,42 @@ EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/65-harrywrt-acme-defaults"
 
 fi
+
+# ------------------------------------------------------------
+# HarryWrt version widget in LuCI Status page
+# Uses LuCI's official status/include mechanism — zero side effects.
+# File 05_harrywrt.js loads before 10_system.js (system info).
+# Reads DISTRIB_DESCRIPTION from /etc/openwrt_release via CGI.
+# ------------------------------------------------------------
+mkdir -p "${FILES_DIR}/www/luci-static/resources/view/status/include"
+
+cat > "${FILES_DIR}/www/luci-static/resources/view/status/include/05_harrywrt.js" <<'EOF'
+'use strict';
+'require baseclass';
+'require fs';
+
+return baseclass.extend({
+    title: _('HarryWrt'),
+
+    load: function() {
+        return fs.lines('/etc/openwrt_release').catch(function() { return []; });
+    },
+
+    render: function(lines) {
+        var desc = '';
+        for (var i = 0; i < lines.length; i++) {
+            var m = lines[i].match(/^DISTRIB_DESCRIPTION='?([^']+)'?/);
+            if (m) { desc = m[1]; break; }
+        }
+        if (!desc) return null;
+
+        return E('table', { 'class': 'table' }, [
+            E('tr', { 'class': 'tr table-titles' }, [
+                E('th', { 'class': 'th', 'colspan': '2', 'style': 'background:#367fa9;color:#fff;padding:6px 10px;font-size:1em;' }, desc)
+            ])
+        ]);
+    }
+});
+EOF
 
 echo "DIY script executed successfully for OpenWrt ${HARRYWRT_VER} / ${TARGET} / ${PROFILE}."

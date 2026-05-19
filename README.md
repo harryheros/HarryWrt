@@ -18,6 +18,7 @@ Minimal base system for users who want full control over what runs on their rout
 - Clean base system — no unnecessary modifications
 - Fully compatible with upstream OpenWrt packages
 - Pre-installed Passwall2 dependencies for offline setup
+- Built-in WAN/DNS/IPv6 health check dashboard
 
 ### Plus Edition
 Stable enhanced firmware. Everything in Clean, plus:
@@ -112,7 +113,7 @@ Pre-installed dependencies: xray-core, sing-box, geoview, v2ray-geoip, v2ray-geo
 | Component | Package(s) | Notes |
 |-----------|-----------|-------|
 | WireGuard VPN | kmod-wireguard, wireguard-tools, luci-app-wireguard, qrencode | QR code peer export supported |
-| DDNS | ddns-scripts, luci-app-ddns, ddns-scripts-cloudflare, ddns-scripts-noip | Disabled by default |
+| DDNS | ddns-scripts, luci-app-ddns, ddns-scripts-cloudflare, ddns-scripts-noip | Requires configuration to activate |
 | UPnP / NAT-PMP | miniupnpd-nftables, luci-app-upnp | Disabled by default; enable via feature manager |
 | Traffic monitoring | nlbwmon, luci-app-nlbwmon | Per-device bandwidth tracking |
 | Wake-on-LAN | etherwake, luci-app-wol | |
@@ -306,6 +307,7 @@ All modifications and distributed binaries comply with upstream OpenWrt licensin
 - LuCI Project
 - Argon Theme (jerrykuku)
 - Passwall2 (Openwrt-Passwall Organization)
+- AdGuard Home (AdGuard)
 
 ---
 
