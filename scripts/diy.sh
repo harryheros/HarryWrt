@@ -133,6 +133,8 @@ config system
   option log_proto 'stderr'
   option conloglevel '8'
   option cronloglevel '${CRONLOGLEVEL}'
+  option description 'HarryWrt ${HARRYWRT_REL:-${HARRYWRT_VER}} ${EDITION}'
+  option revision 'HarryWrt ${HARRYWRT_REL:-${HARRYWRT_VER}} ${EDITION} • OpenWrt ${HARRYWRT_VER} • ${TARGET}'
 
 config timeserver 'ntp'
   option enabled '1'
