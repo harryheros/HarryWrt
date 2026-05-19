@@ -193,7 +193,7 @@ mkdir -p "${FILES_DIR}/etc"
 cat > "${FILES_DIR}/etc/openwrt_release" <<EOF
 DISTRIB_ID='OpenWrt'
 DISTRIB_RELEASE='${HARRYWRT_VER}'
-DISTRIB_REVISION='${REVISION}'
+DISTRIB_REVISION='OpenWrt ${HARRYWRT_VER}'
 DISTRIB_CODENAME='HarryWrt'
 DISTRIB_TARGET='${TARGET}'
 DISTRIB_ARCH=''
@@ -954,17 +954,5 @@ EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/65-harrywrt-acme-defaults"
 
 fi
-
-# ------------------------------------------------------------
-# HarryWrt version widget in LuCI Status page
-# Uses LuCI's official status/include mechanism — zero side effects.
-# File 05_harrywrt.js loads before 10_system.js (system info).
-# Reads version info from ubus system board (which reads /usr/lib/os-release).
-# ------------------------------------------------------------
-mkdir -p "${FILES_DIR}/www/luci-static/resources/view/status/include"
-
-cat > "${FILES_DIR}/www/luci-static/resources/view/status/include/05_harrywrt.js" <<'EOF'
-'use strict';'require baseclass';'require rpc';var callBoard=rpc.declare({object:'system',method:'board'});return baseclass.extend({title:_('HarryWrt'),load:function(){return callBoard();},render:function(data){var desc=data&&data.release&&data.release.description;if(!desc||desc.indexOf('HarryWrt')<0)return null;return E('table',{'class':'table'},[E('tr',{'class':'tr table-titles'},[E('th',{'class':'th','colspan':'2','style':'background:#367fa9;color:#fff;padding:6px 10px;font-size:1em;'},desc)])]);} });
-EOF
 
 echo "DIY script executed successfully for OpenWrt ${HARRYWRT_VER} / ${TARGET} / ${PROFILE}."
