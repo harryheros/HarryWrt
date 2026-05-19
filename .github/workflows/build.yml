@@ -190,7 +190,7 @@ jobs:
 
           # Run DIY script
           chmod +x "${GITHUB_WORKSPACE}/scripts/diy.sh"
-          bash "${GITHUB_WORKSPACE}/scripts/diy.sh" "${OWRT_BASE}" "${TARGET}" "${PROFILE}" 2>&1 | tee -a build.log
+          bash "${GITHUB_WORKSPACE}/scripts/diy.sh" "${OWRT_BASE}" "${TARGET}" "${PROFILE}" "${{ steps.meta.outputs.release }}" 2>&1 | tee -a build.log
 
           make defconfig 2>&1 | tee -a build.log
 

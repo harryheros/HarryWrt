@@ -4,9 +4,9 @@ set -euo pipefail
 # =============================================================
 # HarryWrt DIY Script (Multi-version / Multi-platform / Multi-profile)
 #
-# Usage: diy.sh <OWRT_VERSION> <TARGET> [PROFILE]
-#   e.g. diy.sh 24.10.6 x86_64 clean
-#        diy.sh 25.12.4 aarch64 plus
+# Usage: diy.sh <OWRT_VERSION> <TARGET> [PROFILE] [REL]
+#   e.g. diy.sh 24.10.6 x86_64 clean v3.1
+#        diy.sh 25.12.4 aarch64 plus v3.1
 #
 # - Branding (banner / motd / DISTRIB_DESCRIPTION)
 # - Default LuCI theme forced to Bootstrap
@@ -18,9 +18,10 @@ set -euo pipefail
 # - [plus only] UPnP disabled by default
 # =============================================================
 
-HARRYWRT_VER="${1:?Usage: diy.sh <OWRT_VERSION> <TARGET> [PROFILE]}"
-TARGET="${2:?Usage: diy.sh <OWRT_VERSION> <TARGET> [PROFILE]}"
+HARRYWRT_VER="${1:?Usage: diy.sh <OWRT_VERSION> <TARGET> [PROFILE] [REL]}"
+TARGET="${2:?Usage: diy.sh <OWRT_VERSION> <TARGET> [PROFILE] [REL]}"
 PROFILE="${3:-clean}"
+HARRYWRT_REL="${4:-}"
 
 # Guard: must be run from inside the openwrt source directory
 if [[ ! -f "Makefile" ]] || ! grep -q "TOPDIR:=" Makefile 2>/dev/null; then
@@ -178,10 +179,21 @@ EOF
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<EOF
 #!/bin/sh
-DESC="HarryWrt ${HARRYWRT_VER} ${EDITION} (based on OpenWrt)"
+REL="${HARRYWRT_REL}"
+VER="${HARRYWRT_VER}"
+EDITION="${EDITION}"
+
+if [ -n "\${REL}" ]; then
+  DESC="HarryWrt \${REL} \${EDITION} (OpenWrt \${VER})"
+  REVISION="HarryWrt \${REL}"
+else
+  DESC="HarryWrt \${VER} \${EDITION} (based on OpenWrt)"
+  REVISION="HarryWrt"
+fi
 
 if [ -f /etc/openwrt_release ]; then
   sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='\${DESC}'/" /etc/openwrt_release 2>/dev/null || true
+  sed -i "s/^DISTRIB_REVISION=.*/DISTRIB_REVISION='\${REVISION}'/" /etc/openwrt_release 2>/dev/null || true
 fi
 if [ -f /etc/os-release ]; then
   sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"\${DESC}\"/" /etc/os-release 2>/dev/null || true
