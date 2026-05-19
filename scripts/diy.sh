@@ -175,34 +175,52 @@ HarryWrt ${HARRYWRT_VER} - ${EDITION} Edition (based on OpenWrt) [${TARGET}]
 EOF
 
 # ------------------------------------------------------------
-# 4) UCI defaults: branding
+# 4) Branding — write directly into files/ at build time.
+#    LuCI reads /rom/etc/openwrt_release (the squashfs layer),
+#    so we must place the correct values there at build time,
+#    not via a uci-default that only runs on overlay.
 # ------------------------------------------------------------
-cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<EOF
-#!/bin/sh
-REL="${HARRYWRT_REL}"
-VER="${HARRYWRT_VER}"
-EDITION="${EDITION}"
-
-if [ -n "\${REL}" ]; then
-  DESC="HarryWrt \${REL} \${EDITION} (OpenWrt \${VER})"
-  REVISION="HarryWrt \${REL}"
+if [[ -n "${HARRYWRT_REL}" ]]; then
+  DESC="HarryWrt ${HARRYWRT_REL} ${EDITION} (OpenWrt ${HARRYWRT_VER})"
+  REVISION="HarryWrt ${HARRYWRT_REL}"
 else
-  DESC="HarryWrt \${VER} \${EDITION} (based on OpenWrt)"
+  DESC="HarryWrt ${HARRYWRT_VER} ${EDITION} (based on OpenWrt)"
   REVISION="HarryWrt"
 fi
 
-if [ -f /etc/openwrt_release ]; then
-  sed -i "s/^DISTRIB_DESCRIPTION=.*/DISTRIB_DESCRIPTION='\${DESC}'/" /etc/openwrt_release 2>/dev/null || true
-  sed -i "s/^DISTRIB_REVISION=.*/DISTRIB_REVISION='\${REVISION}'/" /etc/openwrt_release 2>/dev/null || true
-fi
-if [ -f /etc/os-release ]; then
-  sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"\${DESC}\"/" /etc/os-release 2>/dev/null || true
-fi
-if [ -f /usr/lib/os-release ]; then
-  sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"\${DESC}\"/" /usr/lib/os-release 2>/dev/null || true
-fi
-exit 0
+mkdir -p "${FILES_DIR}/etc"
+cat > "${FILES_DIR}/etc/openwrt_release" <<EOF
+DISTRIB_ID='OpenWrt'
+DISTRIB_RELEASE='${HARRYWRT_VER}'
+DISTRIB_REVISION='${REVISION}'
+DISTRIB_CODENAME='HarryWrt'
+DISTRIB_TARGET=''
+DISTRIB_ARCH=''
+DISTRIB_DESCRIPTION='${DESC}'
+DISTRIB_TAINTS=''
 EOF
+
+cat > "${FILES_DIR}/etc/os-release" <<EOF
+NAME="HarryWrt"
+VERSION="${HARRYWRT_REL:-${HARRYWRT_VER}}"
+ID="openwrt"
+ID_LIKE="lede openwrt"
+PRETTY_NAME="${DESC}"
+VERSION_ID="${HARRYWRT_VER}"
+HOME_URL="https://github.com/harryheros/harrywrt"
+EOF
+
+# uci-default fills in DISTRIB_TARGET and DISTRIB_ARCH at runtime
+cat > "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding" <<'BRANDEOF'
+#!/bin/sh
+RELEASE_FILE="/etc/openwrt_release"
+[ -f "$RELEASE_FILE" ] || exit 0
+ARCH="$(uname -m 2>/dev/null || echo '')"
+TARGET="$(cat /tmp/sysinfo/board_name 2>/dev/null || echo '')"
+[ -n "$ARCH" ] && sed -i "s/^DISTRIB_ARCH=.*/DISTRIB_ARCH='${ARCH}'/" "$RELEASE_FILE" || true
+[ -n "$TARGET" ] && sed -i "s/^DISTRIB_TARGET=.*/DISTRIB_TARGET='${TARGET}'/" "$RELEASE_FILE" || true
+exit 0
+BRANDEOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/10-harrywrt-branding"
 
 # ------------------------------------------------------------
