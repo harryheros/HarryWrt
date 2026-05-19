@@ -161,7 +161,7 @@ harrywrt-feature-manager disable upnp
 2. LuCI → System → Backup / Flash Firmware → Flash new firmware
 3. Upload the `.img.gz` file
 4. Choose whether to keep settings:
-   - **Same OpenWrt version** (e.g. HarryWrt v3.1 → v3.2) — keeping settings is safe
+   - **Same OpenWrt version** (e.g. HarryWrt v3.0 → v3.1) — keeping settings is safe
    - **Different OpenWrt version** (e.g. 24.10 → 25.12) — do not keep settings; config format may have changed
 5. Wait for reboot
 
