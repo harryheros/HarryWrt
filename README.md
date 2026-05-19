@@ -23,6 +23,7 @@ Minimal base system for users who want full control over what runs on their rout
 Stable enhanced firmware. Everything in Clean, plus:
 
 - WireGuard VPN, DDNS, UPnP / NAT-PMP, traffic monitoring (nlbwmon), Wake-on-LAN, network diagnostics
+- ACME / Let's Encrypt certificate management
 - UPnP disabled by default; all other components ready to configure on first boot
 - See [Included Components](#included-components) for full package list
 
@@ -56,7 +57,7 @@ Stable enhanced firmware. Everything in Clean, plus:
 
 ### Which platform?
 
-**x86_64** — For soft routers, PCs, virtual machines (Proxmox/ESXi/QEMU), industrial mini-PCs.
+**x86_64** — For soft routers, PCs, virtual machines (Proxmox/ESXi/QEMU), industrial mini-PCs. On first boot, HarryWrt automatically expands the overlay partition to fill the available disk space.
 
 **aarch64 (armsr/armv8)** — Generic ARM64 UEFI image. Works with NanoPi R4S/R5S/R6S, Raspberry Pi 4/5, and other ARM64 devices that support UEFI boot. Note: NanoPi R2S uses arm32 and is not compatible with this image. For device-specific optimizations, consider using dedicated target images.
 
@@ -88,6 +89,9 @@ Each release includes BIOS and UEFI images (x86_64), squashfs and ext4 variants,
 ### Web Interface
 LuCI (HTTPS), luci-compat, ttyd (Web Terminal)
 
+### Network Health
+Built-in WAN/DNS/IPv6 health check dashboard (Status → Network Health). Refreshes every 5 minutes, available on all profiles.
+
 ### Themes
 Default: Bootstrap (official). Optional: Argon (included, not enabled by default)
 
@@ -113,13 +117,14 @@ Pre-installed dependencies: xray-core, sing-box, geoview, v2ray-geoip, v2ray-geo
 | Traffic monitoring | nlbwmon, luci-app-nlbwmon | Per-device bandwidth tracking |
 | Wake-on-LAN | etherwake, luci-app-wol | |
 | Network diagnostics | mtr-json | |
+| ACME / Let's Encrypt | acme, luci-app-acme | Certificate management for HTTPS services |
 
 ---
 
 ## Default Settings
 
 - Hostname: HarryWrt
-- Timezone: Asia/Hong_Kong
+- Timezone: UTC
 - LAN IP: 192.168.1.1
 - User: root
 - Password: unset on first boot
@@ -146,6 +151,20 @@ harrywrt-feature-manager enable upnp
 harrywrt-feature-manager disable upnp
 ```
 
+
+---
+
+## Upgrading
+
+1. Download the new `.img.gz` from the [Releases page](https://github.com/harryheros/harrywrt/releases)
+2. LuCI → System → Backup / Flash Firmware → Flash new firmware
+3. Upload the `.img.gz` file
+4. Choose whether to keep settings:
+   - **Same OpenWrt version** (e.g. HarryWrt v3.1 → v3.2) — keeping settings is safe
+   - **Different OpenWrt version** (e.g. 24.10 → 25.12) — do not keep settings; config format may have changed
+5. Wait for reboot
+
+> After upgrading, manually re-install any packages you had added (AdGuard Home, Passwall2, etc.). Pre-installed HarryWrt packages are unaffected.
 
 ---
 

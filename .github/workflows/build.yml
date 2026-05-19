@@ -221,6 +221,7 @@ jobs:
           MUST_Y_PLUS=(
             "CONFIG_PACKAGE_wireguard-tools"
             "CONFIG_PACKAGE_ddns-scripts"
+            "CONFIG_PACKAGE_luci-app-acme"
           )
 
           missing=0

@@ -12,7 +12,7 @@ set -euo pipefail
 # - Default LuCI theme forced to Bootstrap
 # - Go toolchain GOTOOLCHAIN=auto patch (for geoview)
 # - First boot: musl loader symlink fix (arch-aware)
-# # - First boot: clean non-existent passwall_packages feed
+# - First boot: clean non-existent passwall_packages feed
 # - First boot: patch LuCI package manager (apk trust + mirror auto-detect)
 # - NTP configuration preserved
 # - [plus only] UPnP disabled by default
@@ -127,8 +127,8 @@ fi
 cat > "${FILES_DIR}/etc/config/system" <<EOF
 config system
   option hostname 'HarryWrt'
-  option timezone 'HKT-8'
-  option zonename 'Asia/Hong_Kong'
+  option timezone 'UTC'
+  option zonename 'UTC'
   option ttylogin '0'
   option log_proto 'stderr'
   option conloglevel '8'
@@ -152,6 +152,7 @@ else
   PLUS_BANNER_LINE=""
 fi
 
+BANNER_VER="${HARRYWRT_REL:-${HARRYWRT_VER}}"
 cat > "${FILES_DIR}/etc/banner" <<EOF
 ---------------------------------------------------------------
  _   _                          __        __     _
@@ -161,7 +162,7 @@ cat > "${FILES_DIR}/etc/banner" <<EOF
 |_| |_|\__,_|_|  |_|   \__, |     \_/\_/ |_|   \__|
                         |___/
 ---------------------------------------------------------------
- HarryWrt ${HARRYWRT_VER} | ${EDITION} Edition | ${TARGET}
+ HarryWrt ${BANNER_VER} | ${EDITION} Edition | ${TARGET}
  Based on OpenWrt | No Bloatware | Performance Focused
 ---------------------------------------------------------------
 ${PLUS_BANNER_LINE}
@@ -171,7 +172,7 @@ EOF
 # 3) MOTD
 # ------------------------------------------------------------
 cat > "${FILES_DIR}/etc/motd" <<EOF
-HarryWrt ${HARRYWRT_VER} - ${EDITION} Edition (based on OpenWrt) [${TARGET}]
+HarryWrt ${BANNER_VER} - ${EDITION} Edition (based on OpenWrt) [${TARGET}]
 EOF
 
 # ------------------------------------------------------------
@@ -336,7 +337,7 @@ fi
 #      3) preserves the JSON output format LuCI expects
 # ------------------------------------------------------------
 
-# harrywrt-mirror-check: shared helper used by both 25.12 wrapper and 24.10 uci-default
+# harrywrt-mirror-check: pre-installed for both 25.12 (apk) and 24.10 (opkg)
 mkdir -p "${FILES_DIR}/usr/bin"
 if [[ "${HARRYWRT_VER}" == 25.* ]]; then
 cat > "${FILES_DIR}/usr/bin/harrywrt-mirror-check" <<'EOF'
@@ -356,8 +357,22 @@ else
 	done
 fi
 EOF
-chmod 0755 "${FILES_DIR}/usr/bin/harrywrt-mirror-check"
+else
+cat > "${FILES_DIR}/usr/bin/harrywrt-mirror-check" <<'EOF'
+#!/bin/sh
+# HarryWrt: auto-detect and switch opkg mirror (24.10)
+OFFICIAL="downloads.openwrt.org"
+MIRROR="mirrors.tuna.tsinghua.edu.cn/openwrt"
+CONF="/etc/opkg/distfeeds.conf"
+[ -f "$CONF" ] || exit 0
+if wget -q -O /dev/null --timeout=3 "https://${OFFICIAL}" 2>/dev/null; then
+	sed -i "s|${MIRROR}|${OFFICIAL}|g" "$CONF"
+else
+	sed -i "s|${OFFICIAL}|${MIRROR}|g" "$CONF"
 fi
+EOF
+fi
+chmod 0755 "${FILES_DIR}/usr/bin/harrywrt-mirror-check"
 
 if [[ "${HARRYWRT_VER}" == 25.* ]]; then
 cat > "${FILES_DIR}/etc/uci-defaults/92-patch-package-manager" <<'PATCHEOF'
@@ -666,6 +681,270 @@ uci -q commit upnpd 2>/dev/null || true
 exit 0
 EOF
 chmod 0755 "${FILES_DIR}/etc/uci-defaults/60-harrywrt-plus-safe-defaults"
+
+fi
+
+# ------------------------------------------------------------
+# 11) WAN/DNS health check (all profiles, all platforms)
+#
+#     Lightweight network diagnostics accessible from LuCI.
+#     Tests: WAN reachability, DNS resolution, IPv6 connectivity.
+#     Results cached every 5 minutes via cron, instant on page load.
+# ------------------------------------------------------------
+mkdir -p "${FILES_DIR}/usr/bin"
+mkdir -p "${FILES_DIR}/www/cgi-bin"
+mkdir -p "${FILES_DIR}/etc/cron.d"
+mkdir -p "${FILES_DIR}/usr/share/luci/menu.d"
+mkdir -p "${FILES_DIR}/www/luci-static/resources/view/harrywrt"
+
+cat > "${FILES_DIR}/usr/bin/harrywrt-health-check" <<'EOF'
+#!/bin/sh
+# HarryWrt network health check
+# Outputs JSON to stdout or writes to /tmp/harrywrt-health.json if called with --cache
+
+CACHE_FILE="/tmp/harrywrt-health.json"
+TS="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+check_wan() {
+    if wget -q -O /dev/null --timeout=5 "http://connectivitycheck.gstatic.com/generate_204" 2>/dev/null; then
+        echo "ok"
+    elif wget -q -O /dev/null --timeout=5 "http://www.msftconnecttest.com/connecttest.txt" 2>/dev/null; then
+        echo "ok"
+    else
+        echo "fail"
+    fi
+}
+
+check_dns() {
+    if nslookup openwrt.org >/dev/null 2>&1; then
+        echo "ok"
+    else
+        echo "fail"
+    fi
+}
+
+check_ipv6() {
+    if ping6 -c 1 -W 3 2606:4700:4700::1111 >/dev/null 2>&1; then
+        echo "ok"
+    else
+        echo "fail"
+    fi
+}
+
+check_wan_ip() {
+    ip route get 1.1.1.1 2>/dev/null | grep -o 'src [0-9.]*' | awk '{print $2}' || echo ""
+}
+
+WAN_STATUS="$(check_wan)"
+DNS_STATUS="$(check_dns)"
+IPV6_STATUS="$(check_ipv6)"
+WAN_IP="$(check_wan_ip)"
+
+JSON="{"timestamp":"${TS}","wan":"${WAN_STATUS}","dns":"${DNS_STATUS}","ipv6":"${IPV6_STATUS}","wan_ip":"${WAN_IP}"}"
+
+if [ "${1:-}" = "--cache" ]; then
+    echo "$JSON" > "$CACHE_FILE"
+else
+    echo "$JSON"
+fi
+EOF
+chmod 0755 "${FILES_DIR}/usr/bin/harrywrt-health-check"
+
+# CGI endpoint - serves cached result instantly, or runs check if cache is stale
+cat > "${FILES_DIR}/www/cgi-bin/harrywrt-health" <<'EOF'
+#!/bin/sh
+CACHE="/tmp/harrywrt-health.json"
+echo "Content-Type: application/json"
+echo "Cache-Control: no-cache"
+echo ""
+if [ -f "$CACHE" ] && [ "$(( $(date +%s) - $(date +%s -r "$CACHE" 2>/dev/null || echo 0) ))" -lt 360 ]; then
+    cat "$CACHE"
+else
+    /usr/bin/harrywrt-health-check --cache
+    cat "$CACHE"
+fi
+EOF
+chmod 0755 "${FILES_DIR}/www/cgi-bin/harrywrt-health"
+
+# Cron job - refresh cache every 5 minutes
+cat > "${FILES_DIR}/etc/cron.d/harrywrt-health" <<'EOF'
+*/5 * * * * root /usr/bin/harrywrt-health-check --cache
+EOF
+
+# LuCI menu entry
+cat > "${FILES_DIR}/usr/share/luci/menu.d/harrywrt-health.json" <<'EOF'
+{
+  "admin/status/harrywrt-health": {
+    "title": "Network Health",
+    "order": 5,
+    "action": {
+      "type": "view",
+      "path": "harrywrt/health"
+    }
+  }
+}
+EOF
+
+# LuCI JS view
+cat > "${FILES_DIR}/www/luci-static/resources/view/harrywrt/health.js" <<'EOF'
+'use strict';
+'require view';
+'require poll';
+
+return view.extend({
+    render: function() {
+        var container = E('div', { 'style': 'padding:1em;max-width:600px;' }, [
+            E('h2', {}, 'Network Health'),
+            E('div', { 'id': 'harrywrt-health-status' }, [
+                E('p', { 'style': 'color:#888;' }, 'Checking...')
+            ])
+        ]);
+        return container;
+    },
+
+    pollData: function() {
+        return fetch('/cgi-bin/harrywrt-health')
+            .then(function(r) { return r.json(); })
+            .then(function(d) {
+                var el = document.getElementById('harrywrt-health-status');
+                if (!el) return;
+
+                function badge(status) {
+                    var ok = status === 'ok';
+                    return E('span', {
+                        'style': 'display:inline-block;padding:2px 10px;border-radius:3px;font-weight:bold;color:#fff;background:' + (ok ? '#5cb85c' : '#d9534f') + ';margin-left:8px;'
+                    }, ok ? 'Online' : 'Offline');
+                }
+
+                function row(label, status, extra) {
+                    return E('div', { 'style': 'display:flex;align-items:center;padding:10px 0;border-bottom:1px solid #eee;' }, [
+                        E('span', { 'style': 'width:140px;font-weight:bold;' }, label),
+                        badge(status),
+                        extra ? E('span', { 'style': 'margin-left:12px;color:#666;font-size:0.9em;' }, extra) : null
+                    ].filter(Boolean));
+                }
+
+                var ts = d.timestamp ? new Date(d.timestamp).toLocaleTimeString() : '';
+
+                el.innerHTML = '';
+                el.appendChild(row('WAN', d.wan, d.wan_ip || ''));
+                el.appendChild(row('DNS', d.dns, ''));
+                el.appendChild(row('IPv6', d.ipv6, ''));
+                if (ts) {
+                    el.appendChild(E('p', { 'style': 'margin-top:12px;color:#aaa;font-size:0.85em;' }, 'Last checked: ' + ts));
+                }
+
+                var refreshBtn = E('button', {
+                    'style': 'margin-top:1em;padding:6px 16px;background:#367fa9;color:#fff;border:none;border-radius:4px;cursor:pointer;',
+                    'onclick': function() {
+                        el.innerHTML = '<p style="color:#888;">Checking...</p>';
+                        fetch('/cgi-bin/harrywrt-health?refresh=1')
+                            .then(function(r) { return r.json(); })
+                            .then(function(d2) {
+                                // re-render by re-polling
+                            });
+                    }
+                }, 'Refresh Now');
+                el.appendChild(refreshBtn);
+            })
+            .catch(function() {
+                var el = document.getElementById('harrywrt-health-status');
+                if (el) el.innerHTML = '<p style="color:#d9534f;">Failed to fetch health status.</p>';
+            });
+    },
+
+    load: function() {
+        return this.pollData();
+    },
+
+    handleSaveApply: null,
+    handleSave: null,
+    handleReset: null
+});
+EOF
+
+# ------------------------------------------------------------
+# 12) RootFS auto-expand (x86_64 only)
+#
+#     When the firmware image is written to a disk larger than
+#     the image itself, the remaining space is unallocated.
+#     This script detects unallocated space > 512MB after the
+#     last partition and expands the overlay partition to fill it.
+#     Requires: parted, resize2fs (e2fsprogs)
+#     Safe: exits immediately if conditions are not met.
+# ------------------------------------------------------------
+if [[ "${TARGET}" == "x86_64" ]]; then
+
+cat > "${FILES_DIR}/etc/uci-defaults/95-rootfs-expand" <<'EOF'
+#!/bin/sh
+# HarryWrt: auto-expand overlay partition if disk has unallocated space
+# Runs once on first boot, exits safely if conditions not met
+
+command -v parted >/dev/null 2>&1 || exit 0
+command -v resize2fs >/dev/null 2>&1 || exit 0
+
+# Find the root disk (the disk containing the root filesystem)
+ROOT_DEV="$(findfs / 2>/dev/null || true)"
+[ -z "$ROOT_DEV" ] && exit 0
+
+# Get the disk device (strip partition number)
+DISK="$(echo "$ROOT_DEV" | sed 's/[0-9]*$//;s/p$//')"
+[ -b "$DISK" ] || exit 0
+
+# Find the overlay partition (last partition on disk)
+OVERLAY_PART="$(parted -s "$DISK" print 2>/dev/null | awk '/^ +[0-9]/ {last=$1} END {print last}')"
+[ -z "$OVERLAY_PART" ] || exit 0
+
+# Get disk size and last partition end in MB
+DISK_SIZE_MB="$(parted -s "$DISK" unit MB print 2>/dev/null | grep "^Disk $DISK" | grep -o '[0-9]*MB' | tr -d 'MB')"
+PART_END_MB="$(parted -s "$DISK" unit MB print 2>/dev/null | awk "/^ +${OVERLAY_PART} / {gsub(/MB/,"",$3); print $3}")"
+
+[ -z "$DISK_SIZE_MB" ] || [ -z "$PART_END_MB" ] && exit 0
+
+UNALLOCATED=$(( DISK_SIZE_MB - PART_END_MB ))
+
+# Only expand if more than 512MB unallocated
+[ "$UNALLOCATED" -lt 512 ] && exit 0
+
+logger -t harrywrt "Auto-expanding overlay partition: ${UNALLOCATED}MB available"
+
+# Expand partition to fill disk
+parted -s "$DISK" resizepart "$OVERLAY_PART" 100% || exit 0
+
+# Inform kernel of partition change
+partprobe "$DISK" 2>/dev/null || true
+sleep 2
+
+# Determine overlay partition device
+if echo "$DISK" | grep -q 'nvme\|mmcblk'; then
+    OVERLAY_DEV="${DISK}p${OVERLAY_PART}"
+else
+    OVERLAY_DEV="${DISK}${OVERLAY_PART}"
+fi
+
+[ -b "$OVERLAY_DEV" ] || exit 0
+
+# Resize filesystem
+resize2fs "$OVERLAY_DEV" && logger -t harrywrt "Overlay partition expanded successfully" || true
+
+exit 0
+EOF
+chmod 0755 "${FILES_DIR}/etc/uci-defaults/95-rootfs-expand"
+
+fi
+
+# ------------------------------------------------------------
+# 13) ACME / Let's Encrypt (Plus only)
+# ------------------------------------------------------------
+if [[ "${PROFILE}" == "plus" ]]; then
+
+cat > "${FILES_DIR}/etc/uci-defaults/65-harrywrt-acme-defaults" <<'EOF'
+#!/bin/sh
+# ACME is installed but not configured by default.
+# Configure via LuCI: Services -> ACME Certificates
+exit 0
+EOF
+chmod 0755 "${FILES_DIR}/etc/uci-defaults/65-harrywrt-acme-defaults"
 
 fi
 
