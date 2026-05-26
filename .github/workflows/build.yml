@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: "Release version (e.g. v2.0)"
+        description: "Release version (e.g. v3.1)"
         required: true
         default: "v3.1"
       ssh_debug:
@@ -96,8 +96,18 @@ jobs:
             rel="${{ github.event.inputs.release_version }}"
           else
             tag="${GITHUB_REF##*/}"
-            rel="$(echo "$tag" | grep -oE 'v[0-9]+(\.[0-9]+){0,2}' || true)"
-            [[ -n "$rel" ]] || rel="v1.0"
+            # Accept any tag starting with 'v' followed by a digit; use the
+            # tag verbatim. This supports both plain v3.1 and richer tags
+            # like v3.1-rc1 without silently downgrading to a hardcoded
+            # placeholder version. Anything else aborts the build so we
+            # never publish firmware with the wrong banner.
+            if [[ "$tag" =~ ^v[0-9] ]]; then
+              rel="$tag"
+            else
+              echo "ERROR: pushed tag '$tag' does not match expected vN[.N…] format." >&2
+              echo "       Re-tag with e.g. 'v3.1' and push again." >&2
+              exit 1
+            fi
           fi
           echo "release=$rel" >> "$GITHUB_OUTPUT"
           echo "Release: $rel  |  OpenWrt: ${OWRT_BASE}  |  Target: ${TARGET}"
@@ -412,7 +422,7 @@ jobs:
             "" \
             "### Defaults" \
             "- Hostname: HarryWrt" \
-            "- Timezone: Asia/Hong_Kong" \
+            "- Timezone: UTC" \
             "- LAN: 192.168.1.1" \
             "" \
             "SHA256SUMS included for integrity verification." \

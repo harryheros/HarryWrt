@@ -422,9 +422,12 @@ _harrywrt_mirror_check() {
 }
 
 _harrywrt_has_local_apk() {
+	# Detect whether any argument is a local .apk file path.
+	# The single *.apk pattern covers absolute, relative, and bare-name
+	# forms — case matches against the full string, not the basename.
 	for p in "$@"; do
 		case "$p" in
-			/*.apk|./*.apk|../*.apk|*.apk)
+			*.apk)
 				[ -f "$p" ] && return 0
 			;;
 		esac
@@ -723,14 +726,29 @@ check_wan() {
 }
 
 check_dns() {
+    # Two-step: system resolver first, then fall back to a known external
+    # resolver. System-resolver success is what users actually experience,
+    # so we report "ok" for that. If only the external resolver works the
+    # user is being served by a broken/hijacked local resolver, which we
+    # surface as "fail" rather than masking it.
     if nslookup openwrt.org >/dev/null 2>&1; then
         echo "ok"
+    elif nslookup openwrt.org 1.1.1.1 >/dev/null 2>&1; then
+        echo "fail"
     else
         echo "fail"
     fi
 }
 
 check_ipv6() {
+    # Distinguish three states:
+    #   "ok"        — IPv6 reachable to a public endpoint
+    #   "unavailable" — no global IPv6 address on any interface
+    #   "fail"      — has IPv6 address but cannot reach public endpoint
+    if ! ip -6 addr show scope global 2>/dev/null | grep -q "inet6"; then
+        echo "unavailable"
+        return
+    fi
     if ping6 -c 1 -W 3 2606:4700:4700::1111 >/dev/null 2>&1; then
         echo "ok"
     else
@@ -817,10 +835,22 @@ return view.extend({
                 if (!el) return;
 
                 function badge(status) {
-                    var ok = status === 'ok';
+                    // Three states: ok / fail / unavailable
+                    // unavailable is rendered as neutral grey ("Not configured")
+                    var color, text;
+                    if (status === 'ok') {
+                        color = '#5cb85c';
+                        text  = 'Online';
+                    } else if (status === 'unavailable') {
+                        color = '#888';
+                        text  = 'Not configured';
+                    } else {
+                        color = '#d9534f';
+                        text  = 'Offline';
+                    }
                     return E('span', {
-                        'style': 'display:inline-block;padding:2px 10px;border-radius:3px;font-weight:bold;color:#fff;background:' + (ok ? '#5cb85c' : '#d9534f') + ';margin-left:8px;'
-                    }, ok ? 'Online' : 'Offline');
+                        'style': 'display:inline-block;padding:2px 10px;border-radius:3px;font-weight:bold;color:#fff;background:' + color + ';margin-left:8px;'
+                    }, text);
                 }
 
                 function row(label, status, extra) {
@@ -898,20 +928,31 @@ ROOT_DEV="$(findfs / 2>/dev/null || true)"
 DISK="$(echo "$ROOT_DEV" | sed 's/[0-9]*$//;s/p$//')"
 [ -b "$DISK" ] || exit 0
 
-# Find the overlay partition (last partition on disk)
-OVERLAY_PART="$(parted -s "$DISK" print 2>/dev/null | awk '/^ +[0-9]/ {last=$1} END {print last}')"
+# Find the overlay partition number (the last numbered partition row).
+# parted's "print" output starts each partition line with whitespace + number;
+# the awk script keeps the highest-numbered match so re-ordered tables don't
+# accidentally pick a middle partition.
+OVERLAY_PART="$(parted -s "$DISK" print 2>/dev/null | awk '/^ *[0-9]+ / {if ($1+0 > max) max=$1+0} END {if (max) print max}')"
 [ -z "$OVERLAY_PART" ] && exit 0
 
-# Get disk size and last partition end in MB
-DISK_SIZE_MB="$(parted -s "$DISK" unit MB print 2>/dev/null | grep "^Disk $DISK" | grep -o '[0-9]*MB' | tr -d 'MB')"
-PART_END_MB="$(parted -s "$DISK" unit MB print 2>/dev/null | awk "/^ +${OVERLAY_PART} / {gsub(/MB/,"",$3); print $3}")"
+# Get disk size and last partition end in MB.
+# Note on awk quoting: the script is single-quoted so shell does NOT expand
+# $3 (which would become an empty string under double-quotes since $3 has
+# no positional meaning here). The overlay partition number is passed via
+# -v so the awk script itself has no shell-interpolated tokens.
+DISK_SIZE_MB="$(parted -s "$DISK" unit MB print 2>/dev/null | awk '/^Disk \// {gsub(/MB/,"",$3); sub(/\..*/,"",$3); print $3}')"
+PART_END_MB="$(parted -s "$DISK" unit MB print 2>/dev/null | awk -v p="$OVERLAY_PART" '$1 == p {gsub(/MB/,"",$3); sub(/\..*/,"",$3); print $3}')"
 
-[ -z "$DISK_SIZE_MB" ] || [ -z "$PART_END_MB" ] && exit 0
+if [ -z "$DISK_SIZE_MB" ] || [ -z "$PART_END_MB" ]; then
+    exit 0
+fi
 
 UNALLOCATED=$(( DISK_SIZE_MB - PART_END_MB ))
 
 # Only expand if more than 512MB unallocated
-[ "$UNALLOCATED" -lt 512 ] && exit 0
+if [ "$UNALLOCATED" -lt 512 ]; then
+    exit 0
+fi
 
 logger -t harrywrt "Auto-expanding overlay partition: ${UNALLOCATED}MB available"
 
