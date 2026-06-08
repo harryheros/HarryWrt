@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-GPLv2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.en.html)
 [![Platform](https://img.shields.io/badge/platform-x86__64%20%7C%20aarch64-orange.svg)](#)
-[![Base](https://img.shields.io/badge/base-OpenWrt%2024.10.6%20%7C%2025.12.4-green.svg)](#)
+[![Base](https://img.shields.io/badge/base-OpenWrt%2024.10.7%20%7C%2025.12.4-green.svg)](#)
 
 HarryWrt is a stable, extensible OpenWrt-based firmware available in two profiles: **Clean** for minimalism and upstream compatibility, and **Plus** for users who want a full-featured primary router experience out of the box.
 
@@ -36,12 +36,12 @@ Stable enhanced firmware. Everything in Clean, plus:
 
 | OpenWrt | Profile | Platform | rootfs | Package Manager | Status |
 |---------|---------|----------|--------|-----------------|--------|
-| 24.10.6 | Clean   | x86_64   | 768MB  | opkg            | LTS (EOL Sep 2026) |
-| 24.10.6 | Clean   | aarch64  | 512MB  | opkg            | LTS (EOL Sep 2026) |
+| 24.10.7 | Clean   | x86_64   | 768MB  | opkg            | LTS (EOL Sep 2026) |
+| 24.10.7 | Clean   | aarch64  | 512MB  | opkg            | LTS (EOL Sep 2026) |
 | 25.12.4 | Clean   | x86_64   | 768MB  | apk             | Current Stable |
 | 25.12.4 | Clean   | aarch64  | 512MB  | apk             | Current Stable |
-| 24.10.6 | Plus    | x86_64   | 1024MB | opkg            | LTS (EOL Sep 2026) |
-| 24.10.6 | Plus    | aarch64  | 768MB  | opkg            | LTS (EOL Sep 2026) |
+| 24.10.7 | Plus    | x86_64   | 1024MB | opkg            | LTS (EOL Sep 2026) |
+| 24.10.7 | Plus    | aarch64  | 768MB  | opkg            | LTS (EOL Sep 2026) |
 | 25.12.4 | Plus    | x86_64   | 1024MB | apk             | Current Stable |
 | 25.12.4 | Plus    | aarch64  | 768MB  | apk             | Current Stable |
 
@@ -53,7 +53,7 @@ Stable enhanced firmware. Everything in Clean, plus:
 
 ### Which OpenWrt version should I choose?
 
-**24.10.6** — If you have an existing opkg-based setup with many installed packages and want a stable, familiar upgrade path. Will receive security fixes until September 2026.
+**24.10.7** — If you have an existing opkg-based setup with many installed packages and want a stable, familiar upgrade path. Will receive security fixes until September 2026.
 
 **25.12.4** — Recommended for new installations. Uses the new apk package manager (replaces opkg). Better performance and latest security patches.
 
@@ -174,7 +174,7 @@ harrywrt-feature-manager disable upnp
 
 On the **Plus** edition, the required dependencies (xray-core, sing-box, geoview, v2ray-geoip, v2ray-geosite, tcping, etc.) are already pre-installed, so you only need to install the LuCI app itself. On the **Clean** edition, install those dependencies yourself first (or use the Plus edition).
 
-### On OpenWrt 24.10.6 (opkg)
+### On OpenWrt 24.10.7 (opkg)
 
 1. Download `luci-app-passwall2_VERSION_all.ipk` from [Passwall2 Releases](https://github.com/Openwrt-Passwall/openwrt-passwall2/releases)
 2. In LuCI: System → Software → Upload Package → select the `.ipk` file → Install
@@ -186,7 +186,7 @@ On the **Plus** edition, the required dependencies (xray-core, sing-box, geoview
 2. In LuCI: System → Software → Upload Package → select the `.apk` file → Install
 3. Refresh browser, Passwall2 appears under Services menu
 
-> **Note:** HarryWrt 25.12.4 includes a patched LuCI package manager that allows local `.apk` uploads without signature verification errors. The install experience is identical to 24.10.6 — upload and install directly from the web UI, no SSH required.
+> **Note:** HarryWrt 25.12.4 includes a patched LuCI package manager that allows local `.apk` uploads without signature verification errors. The install experience is identical to 24.10.7 — upload and install directly from the web UI, no SSH required.
 
 > **Important:** On 25.12.4, make sure to download the `.apk` format (not `.ipk`). The `.ipk` format is only compatible with 24.10.x.
 
@@ -227,7 +227,7 @@ AdGuard Home is not pre-installed in HarryWrt. Install it directly from the pack
 apk update && apk add adguardhome
 ```
 
-### On OpenWrt 24.10.6 (opkg)
+### On OpenWrt 24.10.7 (opkg)
 
 ```sh
 opkg update && opkg install adguardhome
@@ -281,8 +281,8 @@ cd ~/Downloads
 sha256sum -c SHA256SUMS-25.12.4-plus-x86_64
 
 # Other variants follow the same pattern
-sha256sum -c SHA256SUMS-24.10.6-clean-x86_64
-sha256sum -c SHA256SUMS-24.10.6-plus-x86_64
+sha256sum -c SHA256SUMS-24.10.7-clean-x86_64
+sha256sum -c SHA256SUMS-24.10.7-plus-x86_64
 sha256sum -c SHA256SUMS-25.12.4-clean-x86_64
 ```
 

@@ -5,7 +5,7 @@ set -euo pipefail
 # HarryWrt DIY Script (Multi-version / Multi-platform / Multi-profile)
 #
 # Usage: diy.sh <OWRT_VERSION> <TARGET> [PROFILE] [REL]
-#   e.g. diy.sh 24.10.6 x86_64 clean v3.1
+#   e.g. diy.sh 24.10.7 x86_64 clean v3.1
 #        diy.sh 25.12.4 aarch64 plus v3.1
 #
 # - Branding (banner / motd / DISTRIB_DESCRIPTION)
