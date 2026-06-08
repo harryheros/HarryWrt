@@ -17,7 +17,7 @@ Minimal base system for users who want full control over what runs on their rout
 
 - Clean base system — no unnecessary modifications
 - Fully compatible with upstream OpenWrt packages
-- Pre-installed Passwall2 dependencies for offline setup
+- No bundled proxy engines — a truly minimal base; add what you need yourself
 - Built-in WAN/DNS/IPv6 health check dashboard
 
 ### Plus Edition
@@ -25,6 +25,7 @@ Stable enhanced firmware. Everything in Clean, plus:
 
 - WireGuard VPN, DDNS, UPnP / NAT-PMP, traffic monitoring (nlbwmon), Wake-on-LAN, network diagnostics
 - ACME / Let's Encrypt certificate management
+- Bundled proxy engines (xray-core, sing-box) and geo data, offline-ready for users who install a proxy LuCI app
 - UPnP disabled by default; all other components ready to configure on first boot
 - See [Included Components](#included-components) for full package list
 
@@ -105,8 +106,8 @@ ip-full, iperf3, tcpdump, ethtool, resolveip
 ### Firewall / Kernel
 nftables (fw4), iptables-nft compatibility layer, kmod-tun, TProxy modules (nft + ipt), nft-socket, nft-nat
 
-### Passwall2 Ready
-Pre-installed dependencies: xray-core, sing-box, geoview, v2ray-geoip, v2ray-geosite, tcping, coreutils, libev, libsodium, libudns. Install passwall2 itself via package manager or manual upload after first boot.
+### Proxy Engines (Plus edition only)
+The **Plus** edition bundles, offline-ready: xray-core, sing-box, geoview, v2ray-geoip, v2ray-geosite, tcping and their runtime libs. The **Clean** edition does not include these — install them yourself if needed. On either edition, a proxy LuCI app (if desired) is installed separately after first boot.
 
 ### Plus Edition — Additional Components
 
@@ -169,9 +170,9 @@ harrywrt-feature-manager disable upnp
 
 ---
 
-## Installing Passwall2
+## Installing a Proxy LuCI App
 
-All required dependencies (xray-core, sing-box, geoview, v2ray-geoip, v2ray-geosite, tcping, etc.) are already pre-installed in HarryWrt. You only need to install the Passwall2 LuCI app itself.
+On the **Plus** edition, the required dependencies (xray-core, sing-box, geoview, v2ray-geoip, v2ray-geosite, tcping, etc.) are already pre-installed, so you only need to install the LuCI app itself. On the **Clean** edition, install those dependencies yourself first (or use the Plus edition).
 
 ### On OpenWrt 24.10.6 (opkg)
 

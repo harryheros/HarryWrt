@@ -218,13 +218,6 @@ jobs:
             "CONFIG_PACKAGE_lua"
             "CONFIG_PACKAGE_luci-lib-jsonc"
             "CONFIG_PACKAGE_resolveip"
-            "CONFIG_PACKAGE_tcping"
-            "CONFIG_PACKAGE_geoview"
-            "CONFIG_PACKAGE_v2ray-geoip"
-            "CONFIG_PACKAGE_v2ray-geosite"
-            "CONFIG_PACKAGE_xray-core"
-            "CONFIG_PACKAGE_sing-box"
-            "CONFIG_PACKAGE_lyaml"
           )
 
           # Plus-only required packages
@@ -232,6 +225,13 @@ jobs:
             "CONFIG_PACKAGE_wireguard-tools"
             "CONFIG_PACKAGE_ddns-scripts"
             "CONFIG_PACKAGE_luci-app-acme"
+            "CONFIG_PACKAGE_tcping"
+            "CONFIG_PACKAGE_geoview"
+            "CONFIG_PACKAGE_v2ray-geoip"
+            "CONFIG_PACKAGE_v2ray-geosite"
+            "CONFIG_PACKAGE_xray-core"
+            "CONFIG_PACKAGE_sing-box"
+            "CONFIG_PACKAGE_lyaml"
           )
 
           missing=0
